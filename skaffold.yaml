@@ -1,0 +1,40 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: go-operator
+build:
+  local:
+    push: false
+    useDockerCLI: true
+  artifacts:
+    - image: go-operator-debug
+      docker:
+        dockerfile: Dockerfile.debug
+      sync:
+        manual:
+          - src: "**/*.go"
+            dest: "/workspace"
+          - src: "go.mod"
+            dest: "/workspace"
+          - src: "go.sum"
+            dest: "/workspace"
+
+
+portForward:
+  - resourceType: deployment
+    resourceName: go-operator
+    port: 40000
+    localPort: 40000
+
+profiles:
+  - name: debug
+    activation:
+      - command: dev
+    build:
+      artifacts:
+        - image: go-operator-debug
+          docker:
+            dockerfile: Dockerfile.debug
+    deploy:
+      kubectl:
+        defaultNamespace: gorizond

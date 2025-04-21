@@ -1,0 +1,15 @@
+FROM golang:1.24.2
+
+WORKDIR /workspace
+
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build -gcflags="all=-N -l" -o manager main.go
+
+EXPOSE 40000 8080
+CMD ["dlv", "exec", "--listen=:40000", "--headless=true", "--api-version=2", "--accept-multiclient", "/workspace/manager"]

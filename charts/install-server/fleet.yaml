@@ -1,0 +1,11 @@
+defaultNamespace: gorizond
+
+helm:
+  chart: ./
+  values:
+    ingress:
+      hosts:
+        - host: ${ if hasKey .ClusterAnnotations "gorizond.domain" }${ get .ClusterAnnotations "gorizond.domain" }${ else }gorizond.cluster${ end }
+          paths:
+            - path: /
+              pathType: ImplementationSpecific

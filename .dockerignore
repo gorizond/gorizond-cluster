@@ -1,0 +1,9 @@
+.idea
+.gitignore
+.env
+Dockerfile
+Dockerfile.debug
+skaffold.yaml
+scripts
+k8s
+charts

@@ -1,0 +1,114 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gorizond-operator
+rules:
+  - apiGroups:
+      - traefik.io
+    resources:
+      - ingressroutetcps
+    verbs:
+      - "*"
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs:
+      - "*"
+  - apiGroups:
+      - provisioning.gorizond.io
+    resources:
+      - clusters
+    verbs:
+      - "*"
+  - apiGroups:
+      - provisioning.cattle.io
+    resources:
+      - clusters
+    verbs:
+      - "*"
+  - apiGroups:
+      - management.cattle.io
+    resources:
+      - clusters
+      - settings
+      - clusterregistrationtokens
+    verbs:
+      - "*"
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - services
+      - deployments
+      - pods
+    verbs:
+      - get
+      - list
+      - create
+      - delete
+      - update
+      - patch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - create
+      - delete
+      - update
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: gorizond-operator-rolebinding
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: gorizond
+roleRef:
+  kind: ClusterRole
+  name: gorizond-operator
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-operator
+  template:
+    metadata:
+      labels:
+        app: go-operator
+    spec:
+      containers:
+        - name: operator
+          image: go-operator-debug
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 40000
+              name: delve
+            - containerPort: 8080
+              name: metrics
+          securityContext:
+            capabilities:
+              add:
+                - SYS_PTRACE
+      serviceAccountName: default
