@@ -36,10 +36,14 @@ env:
   DB_DSN_HEADSCALE: postgres://postgres:password@yb-tserver-service.system-gorizond:5433/gorizond_truncate?sslmode=disable
   # need full domain name because k3s start under vpn
   DB_DSN_KUBERNETES: mysql://root:@tcp(k3s-tidb.system-gorizond.svc.cluster.local:4000)/gorizond_truncate
-  # public goriond domain for use k3s workers (headscale, k3s api)
-  GORIZOND_DOMAIN: public.gorizond.io
+  # public goriond domain for use headscale workers
+  GORIZOND_DOMAIN_HEADSCALE: headscale.public.gorizond.io
+  # public goriond domain for use k3s by workers
+  GORIZOND_DOMAIN_K3S: k3s.public.gorizond.io
   # need for k3s resolve headscale after pod reload
-  CLUSTER_DOMAIN: cluster.local
+  CLUSTER_DOMAIN_HEADSCALE: cluster.local
+  # need for k3s resolve headscale after pod reload
+  CLUSTER_DOMAIN_K3S: cluster.local
   # rancher cacert if exist
   CATTLE_CA_CHECKSUM: ""
 

@@ -14,7 +14,7 @@ data:
             return 200 'OK';
         }
         
-        location ~ ^/(?<workslace>[^/]+)/(?<cluster>[^/]+)/(?<k3s>[^/]+)/(?<headscale>[^/]+)/(?<version>[^/]+)$ {
+        location ~ ^/(?<cattle>[^/]+)/(?<workslace>[^/]+)/(?<cluster>[^/]+)/(?<k3s>[^/]+)/(?<headscale>[^/]+)/(?<version>[^/]+)$ {
             default_type text/plain;
             
             return 200 "
@@ -23,7 +23,7 @@ data:
             echo 'Install tailscale'
             curl -fsSL https://raw.githubusercontent.com/negashev/tailscale-mirror/patch-1/install.sh | sh
             echo 'Install k3s'
-            curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=$version K3S_URL=https://api.$cluster.$workslace.${GORIZOND_DOMAIN} K3S_TOKEN=$k3s sh -s - --vpn-auth='name=tailscale,joinKey=$headscale,controlServerURL=http://headscale.$cluster.$workslace.${GORIZOND_DOMAIN}'  --disable-apiserver-lb --kubelet-arg='eviction-hard=memory.available<50Mi,nodefs.available<5%'
+            curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=$version K3S_URL=https://api-$cluster-$workslace-$cattle.${GORIZOND_DOMAIN_K3S} K3S_TOKEN=$k3s sh -s - --vpn-auth='name=tailscale,joinKey=$headscale,controlServerURL=http://headscale-$cluster-$workslace-$cattle.${GORIZOND_DOMAIN_HEADSCALE}'  --disable-apiserver-lb --kubelet-arg='eviction-hard=memory.available<50Mi,nodefs.available<5%'
             ";
             
             

@@ -440,7 +440,7 @@ type: kubernetes.io/service-account-token`),
 		}
 	}
 
-	domain := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN")
+	domain := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
 	hostPathType := coreType.HostPathCharDev
 	deployment := coreAppisType.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -518,13 +518,14 @@ type: kubernetes.io/service-account-token`),
 								"--https-listen-port=6443",
 								"--tls-san=api-" + domain,
 								"--tls-san=" + obj.Name + "-k3s." + obj.Namespace,
+								"--tls-san=" + obj.Name + "-k3s." + obj.Namespace + ".svc." + os.Getenv("CLUSTER_DOMAIN_K3S"),
 								"--disable=servicelb",
 								"--disable=traefik",
 								"--disable=local-storage",
 								"--disable=metrics-server",
 								"--cluster-cidr=10.44.0.0/16",
 								"--service-cidr=10.45.0.0/16",
-								"--vpn-auth=name=tailscale,joinKey=" + obj.Status.HeadscaleToken + ",controlServerURL=http://" + obj.Name + "-headscale." + obj.Namespace + ".svc." + os.Getenv("CLUSTER_DOMAIN") + ":8080",
+								"--vpn-auth=name=tailscale,joinKey=" + obj.Status.HeadscaleToken + ",controlServerURL=http://" + obj.Name + "-headscale." + obj.Namespace + ".svc." + os.Getenv("CLUSTER_DOMAIN_HEADSCALE") + ":8080",
 							},
 							Env: []coreType.EnvVar{
 								{
@@ -796,7 +797,7 @@ nginx -g 'daemon off;'`,
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{
 				{
-					Host: "api-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN"),
+					Host: "api-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_K3S"),
 					HTTP: &networkingv1.HTTPIngressRuleValue{
 						Paths: []networkingv1.HTTPIngressPath{
 							{
@@ -1092,7 +1093,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{
 				{
-					Host: "headscale-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN"),
+					Host: "headscale-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE"),
 					HTTP: &networkingv1.HTTPIngressRuleValue{
 						Paths: []networkingv1.HTTPIngressPath{
 							{
@@ -1132,7 +1133,7 @@ func createHeadScaleConfig(FullSanitizedName string, obj *gorizondv1.Cluster, ds
 	if err != nil {
 		return nil, err
 	}
-	domain := obj.Name + "." + obj.Namespace + "." + os.Getenv("GORIZOND_DOMAIN")
+	domain := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
 	// Create the Secret object
 	secret := &coreType.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1144,7 +1145,7 @@ func createHeadScaleConfig(FullSanitizedName string, obj *gorizondv1.Cluster, ds
 		},
 		Data: map[string][]byte{
 			"noise_private.key": machineKeyStr,
-			"config.yaml": []byte(fmt.Sprintf(`server_url: "http://headscale.%s"
+			"config.yaml": []byte(fmt.Sprintf(`server_url: "http://headscale-%s"
 listen_addr: 0.0.0.0:8080
 metrics_listen_addr: 0.0.0.0:9090
 grpc_listen_addr: 0.0.0.0:50443

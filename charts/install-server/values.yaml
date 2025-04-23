@@ -13,6 +13,11 @@ image:
   # Overrides the image tag whose default is the chart appVersion.
   tag: alpine
 
+env:
+  # public goriond domain for use headscale by workers
+  GORIZOND_DOMAIN_HEADSCALE: headscale.public.gorizond.io
+  # public goriond domain for use k3s by workers
+  GORIZOND_DOMAIN_K3S: k3s.public.gorizond.io
 # This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
 imagePullSecrets: []
 # This is to override the chart name.
