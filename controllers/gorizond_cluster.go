@@ -12,13 +12,10 @@ import (
 	"github.com/gorizond/gorizond-cluster/pkg"
 	networkingv1 "github.com/gorizond/gorizond-cluster/pkg/apis/networking.k8s.io/v1"
 	gorizondv1 "github.com/gorizond/gorizond-cluster/pkg/apis/provisioning.gorizond.io/v1"
-	Traefikv1alpha1 "github.com/gorizond/gorizond-cluster/pkg/apis/traefik.io/v1alpha1"
 	controllersIngress "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/networking.k8s.io"
 	controllersIngressv1 "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/networking.k8s.io/v1"
 	controllers "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
 	controllersv1 "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io/v1"
-	controllersTraefik "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/traefik.io"
-	controllersTraefikv1alpha1 "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/traefik.io/v1alpha1"
 	headscalev1 "github.com/juanfont/headscale/gen/go/headscale/v1"
 	"github.com/kos-v/dsnparser"
 	"github.com/rancher/lasso/pkg/log"
@@ -39,12 +36,11 @@ import (
 	"tailscale.com/types/key"
 )
 
-func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory, mgmtNetwork *controllersIngress.Factory, mgmtTraefik *controllersTraefik.Factory, dbHeadScale *pkg.DatabaseManager, dbKubernetes *pkg.DatabaseManager) {
+func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory, mgmtNetwork *controllersIngress.Factory, dbHeadScale *pkg.DatabaseManager, dbKubernetes *pkg.DatabaseManager) {
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	SecretResourceController := mgmtCore.Core().V1().Secret()
 	ProvisionResourceController := mgmtProvision.Provisioning().V1().Cluster()
 	NetworkResourceController := mgmtNetwork.Networking().V1().Ingress()
-	TraefikResourceController := mgmtTraefik.Traefik().V1alpha1().IngressRouteTCP()
 	dsnHeadScale := dsnparser.Parse(os.Getenv("DB_DSN_HEADSCALE"))
 	ProvisionResourceController.OnChange(ctx, "status-for-gorizond-cluster", func(key string, obj *cattlev1.Cluster) (*cattlev1.Cluster, error) {
 		if obj == nil {
@@ -144,7 +140,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			}
 
 			if obj.Status.HeadscaleToken != "" && obj.Status.K3sToken == "" && obj.Status.Provisioning == "WaitKubernetesDeploy" {
-				return createKubernetesCreate(sanitizedNameApi, obj, mgmtCore, mgmtApps, TraefikResourceController, SecretResourceController, GorizondResourceController)
+				return createKubernetesCreate(sanitizedNameApi, obj, mgmtCore, mgmtApps, SecretResourceController, NetworkResourceController, GorizondResourceController)
 			}
 
 			if obj.Status.HeadscaleToken != "" && obj.Status.K3sToken == "" && obj.Status.Provisioning == "WaitKubernetesToken" {
@@ -204,17 +200,6 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 				return obj, nil
 			}
 			log.Infof("deleted ingress %s (%s)", ingress.Name, obj.Namespace)
-		}
-		ingressTCPs, err := mgmtTraefik.Traefik().V1alpha1().IngressRouteTCP().List(obj.Namespace, metav1.ListOptions{LabelSelector: selector})
-		if err != nil {
-			return obj, nil
-		}
-		for _, ingressTCP := range ingressTCPs.Items {
-			err = mgmtTraefik.Traefik().V1alpha1().IngressRouteTCP().Delete(obj.Namespace, ingressTCP.Name, nil)
-			if err != nil {
-				return obj, nil
-			}
-			log.Infof("deleted ingressTCP %s (%s)", ingressTCP.Name, obj.Namespace)
 		}
 
 		services, err := mgmtCore.Core().V1().Service().List(obj.Namespace, metav1.ListOptions{LabelSelector: selector})
@@ -352,7 +337,7 @@ func handleResponse(resp *http.Response) (string, error) {
 	return string(body), nil
 }
 
-func createKubernetesCreate(sanitizedNameApi string, obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmtApps *apps.Factory, TraefikResourceController controllersTraefikv1alpha1.IngressRouteTCPController, SecretResourceController corev1.SecretController, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
+func createKubernetesCreate(sanitizedNameApi string, obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmtApps *apps.Factory, SecretResourceController corev1.SecretController, NetworkResourceController controllersIngressv1.IngressController , GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
 
 	secret := &coreType.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -794,10 +779,9 @@ nginx -g 'daemon off;'`,
 			return nil, err
 		}
 	}
-	ingresTCPTLS := Traefikv1alpha1.TLSTCP{
-		Passthrough: true,
-	}
-	ingresTCP := Traefikv1alpha1.IngressRouteTCP{
+
+	pathType := "ImplementationSpecific"
+	ingress := networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.Name + "-k3s",
 			Namespace: obj.Namespace,
@@ -805,30 +789,44 @@ nginx -g 'daemon off;'`,
 				"app":             obj.Name + "-k3s",
 				"gorizond-deploy": obj.Name,
 			},
+			Annotations: map[string]string{
+				"nginx.ingress.kubernetes.io/backend-protocol": "HTTPS",
+			},
 		},
-		Spec: Traefikv1alpha1.IngressRouteTCPSpec{
-			Routes: []Traefikv1alpha1.RouteTCP{
+		Spec: networkingv1.IngressSpec{
+			Rules: []networkingv1.IngressRule{
 				{
-					Match: "HostSNI(`api-" + domain + "`)",
-					Services: []Traefikv1alpha1.ServiceTCP{
-						{
-							Name: obj.Name + "-k3s",
-							Port: 6443,
+					Host: "api-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN"),
+					HTTP: &networkingv1.HTTPIngressRuleValue{
+						Paths: []networkingv1.HTTPIngressPath{
+							{
+								Path:     "/",
+								PathType: &pathType,
+								Backend: networkingv1.IngressBackend{
+									Service: &networkingv1.IngressServiceBackend{
+										Name: obj.Name + "-k3s",
+										Port: networkingv1.ServiceBackendPort{
+											Number: 6443,
+										},
+									},
+								},
+							},
 						},
 					},
 				},
 			},
-			TLS: &ingresTCPTLS,
 		},
 	}
-	_, err = TraefikResourceController.Create(&ingresTCP)
+
+	_, err = NetworkResourceController.Create(&ingress)
 	if err != nil {
 		if errorsk8s.IsAlreadyExists(err) {
-			log.Infof("Service %s already exists in namespace %s", service.Name, service.Namespace)
+			log.Infof("Ingress %s already exists in namespace %s", ingress.Name, ingress.Namespace)
 		} else {
 			return nil, err
 		}
 	}
+
 	obj.Status.Provisioning = "WaitKubernetesToken"
 	return GorizondResourceController.Update(obj)
 }

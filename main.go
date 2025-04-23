@@ -6,7 +6,6 @@ import (
 	"github.com/gorizond/gorizond-cluster/pkg"
 	controllersNetwork "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/networking.k8s.io"
 	controllersGorizond "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
-	controllersTraefik "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/traefik.io"
 	"github.com/joho/godotenv"
 	"github.com/rancher/lasso/pkg/log"
 	controllersManagement "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
@@ -71,17 +70,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	mgmtTraefik, err := controllersTraefik.NewFactoryFromConfig(config)
-	if err != nil {
-		panic(err)
-	}
 	mgmtManagement, err := controllersManagement.NewFactoryFromConfig(config)
 	if err != nil {
 		panic(err)
 	}
 	ctx := signals.SetupSignalContext()
 
-	controllers.InitClusterController(ctx, mgmtGorizond, mgmtProvision, mgmtCore, mgmtApps, mgmtNetwork, mgmtTraefik, dbHeadScale, dbKubernetes)
+	controllers.InitClusterController(ctx, mgmtGorizond, mgmtProvision, mgmtCore, mgmtApps, mgmtNetwork, dbHeadScale, dbKubernetes)
 	controllers.InitRegistrationToken(ctx, mgmtManagement, mgmtCore, mgmtApps)
 
 	if err := start.All(ctx, 10, mgmtGorizond, mgmtProvision, mgmtApps, mgmtManagement); err != nil {
