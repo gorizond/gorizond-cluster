@@ -1,0 +1,13 @@
+defaultNamespace: gorizond
+
+helm:
+  chart: ./
+  values:
+    env:
+      DB_DSN_HEADSCALE: ${ if hasKey .ClusterAnnotations "gorizond.db.headscale" }${ get .ClusterAnnotations "gorizond.db.headscale" }${ else }postgres://postgres:password@yb-tserver-service.system-gorizond:5433/gorizond_truncate?sslmode=disable${ end }
+      DB_DSN_KUBERNETES: ${ if hasKey .ClusterAnnotations "gorizond.db.k3s" }${ get .ClusterAnnotations "gorizond.db.k3s" }${ else }mysql://root:@tcp(k3s-tidb.system-gorizond.svc.cluster.local:4000)/gorizond_truncate${ end }
+      GORIZOND_DOMAIN_HEADSCALE: ${ if hasKey .ClusterAnnotations "gorizond.domain.headscale" }${ get .ClusterAnnotations "gorizond.domain.headscale" }${ else }headscale.public.gorizond.io${ end }
+      GORIZOND_DOMAIN_K3S: ${ if hasKey .ClusterAnnotations "gorizond.domain.k3s" }${ get .ClusterAnnotations "gorizond.domain.k3s" }${ else }k3s.public.gorizond.io${ end }
+      CLUSTER_DOMAIN_HEADSCALE: ${ if hasKey .ClusterAnnotations "gorizond.cluster.domain.headscale" }${ get .ClusterAnnotations "gorizond.cluster.domain.headscale" }${ else }cluster.local${ end }
+      CLUSTER_DOMAIN_K3S: ${ if hasKey .ClusterAnnotations "gorizond.cluster.domain.k3s" }${ get .ClusterAnnotations "gorizond.cluster.domain.k3s" }${ else }cluster.local${ end }
+      CATTLE_CA_CHECKSUM: ${ if hasKey .ClusterAnnotations "gorizond.cattle.ca.checksum" }${ get .ClusterAnnotations "gorizond.cattle.ca.checksum" }${ else }${ end }
