@@ -532,7 +532,7 @@ type: kubernetes.io/service-account-token`),
 								"--disable=metrics-server",
 								"--cluster-cidr=10.44.0.0/16",
 								"--service-cidr=10.45.0.0/16",
-								"--vpn-auth=name=tailscale,joinKey=" + obj.Status.HeadscaleToken + ",controlServerURL=http://" + obj.Name + "-headscale." + obj.Namespace + ".svc." + os.Getenv("CLUSTER_DOMAIN_HEADSCALE") + ":8080",
+								"--vpn-auth=name=tailscale,joinKey=" + obj.Status.HeadscaleToken + ",controlServerURL=http://headscale-"  + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE"),
 							},
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
@@ -903,12 +903,12 @@ func createHeadScaleToken(ctx context.Context, obj *gorizondv1.Cluster, Gorizond
 
 func createHeadScaleCreateUser(ctx context.Context, obj *gorizondv1.Cluster, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
 
-	err := WaitFor404(obj.Name+"-headscale."+obj.Namespace+".svc:8080", ctx)
+	err := WaitFor404(obj.Name+"-headscale."+obj.Namespace+".svc." + os.Getenv("CLUSTER_DOMAIN_HEADSCALE") + ":8080", ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	gprcTarget := obj.Name + "-headscale." + obj.Namespace + ".svc:50444"
+	gprcTarget := obj.Name + "-headscale." + obj.Namespace + ".svc." + os.Getenv("CLUSTER_DOMAIN_HEADSCALE") + ":50444"
 	conn, err := grpc.NewClient(
 		gprcTarget,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -1013,7 +1013,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 										Port: intstr.FromInt(8080),
 									},
 								},
-								InitialDelaySeconds: 10,
+								InitialDelaySeconds: 30,
 								PeriodSeconds:       10,
 							},
 						},
@@ -1048,7 +1048,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 										Port: intstr.FromInt(50444),
 									},
 								},
-								InitialDelaySeconds: 10,
+								InitialDelaySeconds: 30,
 								PeriodSeconds:       10,
 							},
 						},

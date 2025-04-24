@@ -161,7 +161,7 @@ run.sh`,
 									},
 									{
 										Name:  "STRICT_VERIFY",
-										Value: "true",
+										Value: "false",
 									},
 									{
 										Name:  "KUBECONFIG",
