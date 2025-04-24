@@ -633,7 +633,7 @@ until [ -f /yaml/k3s.yaml ]; do
 done
 cp /source/token /usr/share/nginx/html/token
 cp /yaml/k3s.yaml /usr/share/nginx/html/k3s.yaml
-sed -i 's|server: https://127.0.0.1:6443|server: https://` + obj.Name + `-k3s.` + obj.Namespace + `:6443|' /usr/share/nginx/html/k3s.yaml
+sed -i 's|server: https://127.0.0.1:6443|server: https://` + obj.Name + "-k3s." + obj.Namespace + ".svc." + os.Getenv("CLUSTER_DOMAIN_K3S") + `:6443|' /usr/share/nginx/html/k3s.yaml
 cp /source/tls/server-ca.crt /usr/share/nginx/html/ca.crt
 chmod 777 -R /usr/share/nginx/html
 nginx -g 'daemon off;'`,
@@ -798,7 +798,7 @@ nginx -g 'daemon off;'`,
 			return nil, err
 		}
 	}
-
+	k3s_cert := os.Getenv("GORIZOND_CERT_K3S")
 	pathType := "ImplementationSpecific"
 	ingress := networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
@@ -835,6 +835,14 @@ nginx -g 'daemon off;'`,
 				},
 			},
 		},
+	}
+
+	if k3s_cert != "" {
+		ingress.Spec.TLS = []networkingv1.IngressTLS{
+			{
+				Hosts:      []string{"api-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_K3S")},
+			},
+		}
 	}
 
 	_, err = NetworkResourceController.Create(&ingress)
@@ -1109,6 +1117,8 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 			return nil, err
 		}
 	}
+	
+	hs_cert := os.Getenv("GORIZOND_CERT_HEADSCALE")
 	pathType := "ImplementationSpecific"
 	ingress := networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1142,6 +1152,14 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 				},
 			},
 		},
+	}
+
+	if hs_cert != "" {
+		ingress.Spec.TLS = []networkingv1.IngressTLS{
+			{
+				Hosts:      []string{"headscale-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")},
+			},
+		}
 	}
 
 	_, err = NetworkResourceController.Create(&ingress)

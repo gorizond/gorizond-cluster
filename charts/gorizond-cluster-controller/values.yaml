@@ -38,8 +38,10 @@ env:
   DB_DSN_KUBERNETES: mysql://root:@tcp(k3s-tidb.system-gorizond.svc.cluster.local:4000)/gorizond_truncate
   # public goriond domain for use headscale workers
   GORIZOND_DOMAIN_HEADSCALE: headscale.public.gorizond.io
+  GORIZOND_CERT_HEADSCALE: 
   # public goriond domain for use k3s by workers
   GORIZOND_DOMAIN_K3S: k3s.public.gorizond.io
+  GORIZOND_CERT_K3S: 
   # need for k3s resolve headscale after pod reload
   CLUSTER_DOMAIN_HEADSCALE: cluster.local
   # need for k3s resolve headscale after pod reload
