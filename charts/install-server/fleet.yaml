@@ -13,7 +13,7 @@ helm:
         kubernetes.io/tls-acme: 'true'
       tls: 
         hosts:
-          - ${ if hasKey .ClusterAnnotations "gorizond.domain.install" }${ get .ClusterAnnotations "gorizond.domain.install" }${ else }gorizond.cluster${ end }
+          - '${ if hasKey .ClusterAnnotations "gorizond.domain.install" }${ get .ClusterAnnotations "gorizond.domain.install" }${ else }gorizond.cluster${ end }'
         secretName: gorizond-install-tls
       hosts:
         - host: ${ if hasKey .ClusterAnnotations "gorizond.domain.install" }${ get .ClusterAnnotations "gorizond.domain.install" }${ else }gorizond.cluster${ end }
