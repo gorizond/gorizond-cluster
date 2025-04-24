@@ -118,7 +118,7 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 								Resources: coreType.ResourceRequirements{
 									Requests: coreType.ResourceList{
 										coreType.ResourceCPU: resource.MustParse("10m"),
-										coreType.ResourceMemory: resource.MustParse("128m"),
+										coreType.ResourceMemory: resource.MustParse("128Mi"),
 									},
 								},
 								Args: []string{

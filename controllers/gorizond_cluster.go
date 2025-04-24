@@ -984,7 +984,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
 									coreType.ResourceCPU: resource.MustParse("10m"),
-									coreType.ResourceMemory: resource.MustParse("128m"),
+									coreType.ResourceMemory: resource.MustParse("128Mi"),
 								},
 							},
 							Ports: []coreType.ContainerPort{
