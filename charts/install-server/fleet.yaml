@@ -9,8 +9,15 @@ helm:
       - name: GORIZOND_DOMAIN_K3S
         value: ${ if hasKey .ClusterAnnotations "gorizond.domain.k3s" }${ get .ClusterAnnotations "gorizond.domain.k3s" }${ else }k3s.public.gorizond.io${ end }
     ingress:
+      annotations:
+        kubernetes.io/tls-acme: 'true'
+      tls: 
+        hosts:
+          - ${ if hasKey .ClusterAnnotations "gorizond.domain.install" }${ get .ClusterAnnotations "gorizond.domain.install" }${ else }gorizond.cluster${ end }
+        secretName: gorizond-install-tls
       hosts:
-        - host: ${ if hasKey .ClusterAnnotations "gorizond.domain" }${ get .ClusterAnnotations "gorizond.domain" }${ else }gorizond.cluster${ end }
+        - host: ${ if hasKey .ClusterAnnotations "gorizond.domain.install" }${ get .ClusterAnnotations "gorizond.domain.install" }${ else }gorizond.cluster${ end }
           paths:
             - path: /
               pathType: ImplementationSpecific
+      
