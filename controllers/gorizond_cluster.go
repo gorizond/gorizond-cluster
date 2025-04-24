@@ -537,7 +537,7 @@ type: kubernetes.io/service-account-token`),
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
 									coreType.ResourceCPU: resource.MustParse("100m"),
-									coreType.ResourceMemory: resource.MustParse("512m"),
+									coreType.ResourceMemory: resource.MustParse("512Mi"),
 								},
 							},
 							Env: []coreType.EnvVar{
