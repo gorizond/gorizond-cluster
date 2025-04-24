@@ -33,21 +33,24 @@ serviceAccount:
 
 # please create databases before using gorizond_truncate
 env:
-  DB_DSN_HEADSCALE: postgres://postgres:password@yb-tserver-service.system-gorizond:5433/gorizond_truncate?sslmode=disable
-  # need full domain name because k3s start under vpn
-  DB_DSN_KUBERNETES: mysql://root:@tcp(k3s-tidb.system-gorizond.svc.cluster.local:4000)/gorizond_truncate
-  # public goriond domain for use headscale workers
-  GORIZOND_DOMAIN_HEADSCALE: headscale.public.gorizond.io
-  GORIZOND_CERT_HEADSCALE: 
-  # public goriond domain for use k3s by workers
-  GORIZOND_DOMAIN_K3S: k3s.public.gorizond.io
-  GORIZOND_CERT_K3S: 
-  # need for k3s resolve headscale after pod reload
-  CLUSTER_DOMAIN_HEADSCALE: cluster.local
-  # need for k3s resolve headscale after pod reload
-  CLUSTER_DOMAIN_K3S: cluster.local
-  # rancher cacert if exist
-  CATTLE_CA_CHECKSUM: ""
+  - name: DB_DSN_HEADSCALE
+    value: "postgres://postgres:password@yb-tserver-service.system-gorizond:5433/gorizond_truncate?sslmode=disable"
+  - name: DB_DSN_KUBERNETES
+    value: "mysql://root:@tcp(k3s-tidb.system-gorizond.svc.cluster.local:4000)/gorizond_truncate"
+  - name: GORIZOND_DOMAIN_HEADSCALE
+    value: "headscale.public.gorizond.io"
+  - name: GORIZOND_CERT_HEADSCALE
+    value: ""
+  - name: GORIZOND_DOMAIN_K3S
+    value: "k3s.public.gorizond.io"
+  - name: GORIZOND_CERT_K3S
+    value: ""
+  - name: CLUSTER_DOMAIN_HEADSCALE
+    value: "cluster.local"
+  - name: CLUSTER_DOMAIN_K3S
+    value: "cluster.local"
+  - name: CATTLE_CA_CHECKSUM
+    value: ""
 
 # This is for setting Kubernetes Annotations to a Pod.
 # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/

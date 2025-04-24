@@ -3,6 +3,11 @@ defaultNamespace: gorizond
 helm:
   chart: ./
   values:
+    env:
+      - name: GORIZOND_DOMAIN_HEADSCALE
+        value: ${ if hasKey .ClusterAnnotations "gorizond.domain.headscale" }${ get .ClusterAnnotations "gorizond.domain.headscale" }${ else }headscale.public.gorizond.io${ end }
+      - name: GORIZOND_DOMAIN_K3S
+        value: ${ if hasKey .ClusterAnnotations "gorizond.domain.k3s" }${ get .ClusterAnnotations "gorizond.domain.k3s" }${ else }k3s.public.gorizond.io${ end }
     ingress:
       hosts:
         - host: ${ if hasKey .ClusterAnnotations "gorizond.domain" }${ get .ClusterAnnotations "gorizond.domain" }${ else }gorizond.cluster${ end }
