@@ -477,7 +477,7 @@ type: kubernetes.io/service-account-token`),
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
 									coreType.ResourceCPU: resource.MustParse("10m"),
-									coreType.ResourceMemory: resource.MustParse("24m"),
+									coreType.ResourceMemory: resource.MustParse("24Mi"),
 								},
 							},
 							SecurityContext: &coreType.SecurityContext{
@@ -619,7 +619,7 @@ type: kubernetes.io/service-account-token`),
 							Image: "nginx:alpine",
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
-									coreType.ResourceMemory: resource.MustParse("4m"),
+									coreType.ResourceMemory: resource.MustParse("4Mi"),
 								},
 							},
 							Args: []string{
@@ -1023,7 +1023,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 							},
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
-									coreType.ResourceMemory: resource.MustParse("4m"),
+									coreType.ResourceMemory: resource.MustParse("4Mi"),
 								},
 							},
 							Ports: []coreType.ContainerPort{
