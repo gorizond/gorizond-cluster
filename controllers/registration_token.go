@@ -122,7 +122,7 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 									},
 								},
 								Args: []string{
-									`curl --output /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ` + cluster.Spec.DisplayName + "-k3s." + cluster.Spec.FleetWorkspaceName + `:80/ca.crt
+									`curl --output /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ` + cluster.Spec.DisplayName + "-k3s." + cluster.Spec.FleetWorkspaceName + ".svc." + os.Getenv("CLUSTER_DOMAIN_K3S") + `:80/ca.crt
 kubectl -n cattle-system get secret cattle-admin-token -o jsonpath='{.data.token}' | base64 --decode > /var/run/secrets/kubernetes.io/serviceaccount/token
 run.sh`,
 								},
