@@ -30,6 +30,7 @@ import (
 	coreAppisType "k8s.io/api/apps/v1"
 	coreType "k8s.io/api/core/v1"
 	errorsk8s "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
@@ -473,6 +474,12 @@ type: kubernetes.io/service-account-token`),
 							Args: []string{
 								"tailscaled",
 							},
+							Resources: coreType.ResourceRequirements{
+								Requests: coreType.ResourceList{
+									coreType.ResourceCPU: resource.MustParse("10m"),
+									coreType.ResourceMemory: resource.MustParse("24m"),
+								},
+							},
 							SecurityContext: &coreType.SecurityContext{
 								RunAsNonRoot:             pointer.BoolPtr(false),
 								ReadOnlyRootFilesystem:   pointer.BoolPtr(false),
@@ -526,6 +533,12 @@ type: kubernetes.io/service-account-token`),
 								"--cluster-cidr=10.44.0.0/16",
 								"--service-cidr=10.45.0.0/16",
 								"--vpn-auth=name=tailscale,joinKey=" + obj.Status.HeadscaleToken + ",controlServerURL=http://" + obj.Name + "-headscale." + obj.Namespace + ".svc." + os.Getenv("CLUSTER_DOMAIN_HEADSCALE") + ":8080",
+							},
+							Resources: coreType.ResourceRequirements{
+								Requests: coreType.ResourceList{
+									coreType.ResourceCPU: resource.MustParse("100m"),
+									coreType.ResourceMemory: resource.MustParse("512m"),
+								},
 							},
 							Env: []coreType.EnvVar{
 								{
@@ -604,6 +617,11 @@ type: kubernetes.io/service-account-token`),
 						{
 							Name:  "nginx",
 							Image: "nginx:alpine",
+							Resources: coreType.ResourceRequirements{
+								Requests: coreType.ResourceList{
+									coreType.ResourceMemory: resource.MustParse("4m"),
+								},
+							},
 							Args: []string{
 								`until [ -f /source/token ]; do
 	echo "wait /source/token"
@@ -955,6 +973,12 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 							Args: []string{
 								"serve",
 							},
+							Resources: coreType.ResourceRequirements{
+								Requests: coreType.ResourceList{
+									coreType.ResourceCPU: resource.MustParse("10m"),
+									coreType.ResourceMemory: resource.MustParse("128m"),
+								},
+							},
 							Ports: []coreType.ContainerPort{
 								{
 									ContainerPort: 8080,
@@ -988,6 +1012,11 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 							Args: []string{
 								"TCP-LISTEN:50444,fork",
 								"UNIX-CONNECT:/var/run/headscale/headscale.sock",
+							},
+							Resources: coreType.ResourceRequirements{
+								Requests: coreType.ResourceList{
+									coreType.ResourceMemory: resource.MustParse("4m"),
+								},
 							},
 							Ports: []coreType.ContainerPort{
 								{

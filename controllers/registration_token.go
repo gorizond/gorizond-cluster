@@ -14,6 +14,7 @@ import (
 	errorsk8s "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManagement.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory) {
@@ -113,6 +114,12 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 								ImagePullPolicy: coreType.PullIfNotPresent,
 								Command: []string{
 									"/bin/sh", "-c",
+								},
+								Resources: coreType.ResourceRequirements{
+									Requests: coreType.ResourceList{
+										coreType.ResourceCPU: resource.MustParse("10m"),
+										coreType.ResourceMemory: resource.MustParse("128m"),
+									},
 								},
 								Args: []string{
 									`curl --output /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ` + cluster.Spec.DisplayName + "-k3s." + cluster.Spec.FleetWorkspaceName + `:80/ca.crt
