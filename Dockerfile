@@ -23,4 +23,4 @@ FROM alpine:latest
 COPY --from=builder /app/gorizond-cluster-controller /gorizond-cluster-controller
 
 # Command to run the executable
-CMD ["/gorizond-cluster-controller"]
+ENTRYPOINT ["/gorizond-cluster-controller"]
