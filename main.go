@@ -26,8 +26,10 @@ func main() {
 		log.Infof(".env file not found")
 	}
 
-	var kubeconfig_file string
-	flag.StringVar(&kubeconfig_file, "kubeconfig", "", "Path to kubeconfig")
+	var kubeconfig_file_data_cluster string
+	var kubeconfig_file_rancher string
+	flag.StringVar(&kubeconfig_file_data_cluster, "kubeconfig-data", "", "Path to kubeconfig for k3s, headscale")
+	flag.StringVar(&kubeconfig_file_rancher, "kubeconfig-rancher", "", "Path to kubeconfig for rancher cluster")
 	flag.Parse()
 
 	dbHeadScale, err := pkg.NewDatabaseManager(os.Getenv("DB_DSN_HEADSCALE"))
@@ -40,37 +42,58 @@ func main() {
 		panic(err)
 	}
 
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		log.Infof("Error getting kubernetes config: %v", err)
-		config, err = kubeconfig.GetNonInteractiveClientConfig(kubeconfig_file).ClientConfig()
+	var configDataCluster *rest.Config
+	if kubeconfig_file_data_cluster != "" {
+		configDataCluster, err = kubeconfig.GetNonInteractiveClientConfig(kubeconfig_file_data_cluster).ClientConfig()
 		if err != nil {
 			panic(err)
 		}
-		log.Infof("Using kubeconfig file")
+		log.Infof("Using kubeconfig file for data cluster")
+	} else {
+		configDataCluster, err = rest.InClusterConfig()
+		if err != nil {
+			log.Infof("Error getting kubernetes config for data cluster: %v", err)
+			panic(err)
+		}
 	}
 
-	mgmtGorizond, err := controllersGorizond.NewFactoryFromConfig(config)
+	var configRancher *rest.Config
+	if kubeconfig_file_rancher != "" {
+		configRancher, err = kubeconfig.GetNonInteractiveClientConfig(kubeconfig_file_rancher).ClientConfig()
+		if err != nil {
+			panic(err)
+		}
+		log.Infof("Using kubeconfig file for rancher")
+	} else {
+		configRancher, err = rest.InClusterConfig()
+		if err != nil {
+			log.Infof("Error getting kubernetes config for rancher: %v", err)
+			panic(err)
+		}
+	}
+
+	mgmtGorizond, err := controllersGorizond.NewFactoryFromConfig(configRancher)
 	if err != nil {
 		panic(err)
 	}
-	mgmtProvision, err := controllersProvision.NewFactoryFromConfig(config)
+	mgmtProvision, err := controllersProvision.NewFactoryFromConfig(configRancher)
 	if err != nil {
 		panic(err)
 	}
-	mgmtCore, err := core.NewFactoryFromConfig(config)
+	mgmtManagement, err := controllersManagement.NewFactoryFromConfig(configRancher)
 	if err != nil {
 		panic(err)
 	}
-	mgmtApps, err := apps.NewFactoryFromConfig(config)
+
+	mgmtCore, err := core.NewFactoryFromConfig(configDataCluster)
 	if err != nil {
 		panic(err)
 	}
-	mgmtNetwork, err := controllersNetwork.NewFactoryFromConfig(config)
+	mgmtApps, err := apps.NewFactoryFromConfig(configDataCluster)
 	if err != nil {
 		panic(err)
 	}
-	mgmtManagement, err := controllersManagement.NewFactoryFromConfig(config)
+	mgmtNetwork, err := controllersNetwork.NewFactoryFromConfig(configDataCluster)
 	if err != nil {
 		panic(err)
 	}

@@ -3,6 +3,10 @@ defaultNamespace: gorizond
 helm:
   chart: ./
   values:
+    ${ if hasKey .ClusterAnnotations "gorizond.command" }
+    command:
+      - ${ get .ClusterAnnotations "gorizond.command" }
+    ${ end }
     env:
       - name: DB_DSN_HEADSCALE
         value: ${ if hasKey .ClusterAnnotations "gorizond.db.headscale" }${ get .ClusterAnnotations "gorizond.db.headscale" }${ else }postgres://postgres:password@yb-tserver-service.system-gorizond:5433/gorizond_truncate?sslmode=disable${ end }
