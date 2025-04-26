@@ -28,6 +28,8 @@ spec:
                   type: string
                 headscaleToken:
                   type: string
+                namespace:
+                  type: string
   scope: Namespaced
   names:
     plural: clusters

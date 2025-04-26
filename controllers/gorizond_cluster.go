@@ -40,6 +40,7 @@ import (
 func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory, mgmtNetwork *controllersIngress.Factory, dbHeadScale *pkg.DatabaseManager, dbKubernetes *pkg.DatabaseManager) {
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	SecretResourceController := mgmtCore.Core().V1().Secret()
+	NamespaceResourceController := mgmtCore.Core().V1().Namespace()
 	ProvisionResourceController := mgmtProvision.Provisioning().V1().Cluster()
 	NetworkResourceController := mgmtNetwork.Networking().V1().Ingress()
 	dsnHeadScale := dsnparser.Parse(os.Getenv("DB_DSN_HEADSCALE"))
@@ -83,6 +84,24 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 
 		if obj.Status.Provisioning == "Done" {
 			return nil, nil
+		}
+
+		if obj.Namespace == "fleet-default" || obj.Namespace == "fleet-local" {
+			return nil, nil
+		}
+		
+		// create Namespace in cluster if not exist
+		if obj.Status.Namespace == "" {
+			_, err := NamespaceResourceController.Create(&coreType.Namespace{ObjectMeta: metav1.ObjectMeta{Name: obj.Namespace}})
+			if err != nil {
+				if errorsk8s.IsAlreadyExists(err) {
+					log.Infof("Namespace %s already exists", obj.Namespace)
+				} else {
+					return nil, err
+				}
+			}
+			obj.Status.Namespace = obj.Namespace
+			return GorizondResourceController.Update(obj)
 		}
 
 		if obj.Status.Provisioning == "" {

@@ -29,6 +29,7 @@ type ClusterStatus struct {
 	Cluster        string `json:"cluster"`
 	K3sToken       string `json:"k3sToken"`
 	HeadscaleToken string `json:"headscaleToken"`
+	Namespace      string `json:"namespace"`
 }
 
 // Tag represents a Docker tag

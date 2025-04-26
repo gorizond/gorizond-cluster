@@ -22,11 +22,13 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 	CattleClusterResourceController := mgmtManagement.Management().V3().Cluster()
 	SettingResourceController := mgmtManagement.Management().V3().Setting()
 	SecretResourceController := mgmtCore.Core().V1().Secret()
+	AppResourceController := mgmtApps.Apps().V1().Deployment()
 	RegistrationTokenResourceController.OnChange(ctx, "gorizond-cluster-registration", func(key string, token *v3.ClusterRegistrationToken) (*v3.ClusterRegistrationToken, error) {
 		if token == nil {
 			return nil, nil
 		}
-		if token.Namespace == "local" {
+
+		if token.Namespace == "local" || token.Namespace == "fleet-default" || token.Namespace == "fleet-local" {
 			return token, nil
 		}
 
@@ -227,7 +229,7 @@ run.sh`,
 			},
 		}
 
-		_, err = mgmtApps.Apps().V1().Deployment().Create(&deployment)
+		_, err = AppResourceController.Create(&deployment)
 		if err != nil {
 			if errorsk8s.IsAlreadyExists(err) {
 				log.Infof("Deployment %s already exists in namespace %s", deployment.Name, deployment.Namespace)
