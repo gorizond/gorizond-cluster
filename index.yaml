@@ -3,6 +3,16 @@ entries:
   gorizond-cluster-controller:
   - apiVersion: v2
     appVersion: 1.16.0
+    created: "2025-04-27T13:53:18.265376751Z"
+    description: Gorizond operator for Rancher
+    digest: a508cfe666276746008c6338208ea50ecf78efc0d4ada3c5b67a478fe845966a
+    name: gorizond-cluster-controller
+    type: application
+    urls:
+    - https://github.com/gorizond/gorizond-cluster/releases/download/gorizond-cluster-controller-0.1.12/gorizond-cluster-controller-0.1.12.tgz
+    version: 0.1.12
+  - apiVersion: v2
+    appVersion: 1.16.0
     created: "2025-04-27T13:27:31.75658349Z"
     description: Gorizond operator for Rancher
     digest: 66eff36e99fc2cdf4aa8fdd25568c7bcb4639193f00c6b9fa1deb5e56867151e
@@ -132,4 +142,4 @@ entries:
     urls:
     - https://github.com/gorizond/gorizond-cluster/releases/download/install-server-0.1.1/install-server-0.1.1.tgz
     version: 0.1.1
-generated: "2025-04-27T13:27:31.756625859Z"
+generated: "2025-04-27T13:53:18.265429269Z"
