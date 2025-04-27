@@ -3,9 +3,17 @@ defaultNamespace: gorizond
 helm:
   chart: ./
   values:
-    ${ if hasKey .ClusterAnnotations "gorizond.command" }
-    command:
-      - ${ get .ClusterAnnotations "gorizond.command" }
+    ${ if hasKey .ClusterAnnotations "gorizond.args" }
+    args:
+      - ${ get .ClusterAnnotations "gorizond.args" }
+    volumeMounts:
+      - mountPath: /rancher
+        name: rancher-config
+    volumes:
+      - name: rancher-config
+        secret:
+          defaultMode: 420
+          secretName: gorizond-kubeconfig
     ${ end }
     env:
       - name: DB_DSN_HEADSCALE

@@ -28,10 +28,9 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 			return nil, nil
 		}
 
-		if token.Namespace == "local" || token.Namespace == "fleet-default" || token.Namespace == "fleet-local" {
+		if token.Namespace == "local" {
 			return token, nil
 		}
-
 		recordedNote := token.Annotations != nil && token.Annotations["cattle-cluster-agent-create"] == "true"
 
 		if recordedNote {
@@ -48,6 +47,14 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 		if err != nil {
 			return nil, err
 		}
+		// ignore system clusters
+		if cluster.Annotations == nil {
+			if cluster.Annotations["gorizond.ignore"] == "true" {
+				token.Annotations["cattle-cluster-agent-create"] = "true"
+				return RegistrationTokenResourceController.Update(token)
+			}
+		}
+		
 		serverUrl, err := SettingResourceController.Get("server-url", metav1.GetOptions{})
 		if err != nil {
 			return nil, err

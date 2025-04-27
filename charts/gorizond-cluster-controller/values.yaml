@@ -93,6 +93,10 @@ autoscaling:
 
 # Additional volumes on the output Deployment definition.
 volumes: []
+# - name: rancher-config
+#   secret:
+#     defaultMode: 420
+#     secretName: gorizond-kubeconfig
 # - name: foo
 #   secret:
 #     secretName: mysecret
@@ -100,6 +104,8 @@ volumes: []
 
 # Additional volumeMounts on the output Deployment definition.
 volumeMounts: []
+# - mountPath: /rancher
+#   name: rancher-config
 # - name: foo
 #   mountPath: "/etc/foo"
 #   readOnly: true
