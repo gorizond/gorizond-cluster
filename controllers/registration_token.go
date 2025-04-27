@@ -50,6 +50,9 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 		// ignore system clusters
 		if cluster.Annotations != nil {
 			if cluster.Annotations["gorizond.ignore"] == "true" {
+				if token.Annotations == nil {
+					token.Annotations = make(map[string]string)
+				}
 				token.Annotations["cattle-cluster-agent-create"] = "true"
 				return RegistrationTokenResourceController.Update(token)
 			}
