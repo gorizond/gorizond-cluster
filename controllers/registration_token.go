@@ -81,6 +81,9 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 				}
 				log.Infof("deleted secret %s (%s)", secret.Name, cluster.Spec.FleetWorkspaceName)
 			}
+			if token.Annotations == nil {
+				token.Annotations = make(map[string]string)
+			}
 			token.Annotations["cattle-cluster-agent-create"] = "true"
 			return RegistrationTokenResourceController.Update(token)
 		}
