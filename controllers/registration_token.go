@@ -3,7 +3,7 @@ package controllers
 import (
 	"context"
 	"os"
-
+	"fmt"
 	"github.com/rancher/lasso/pkg/log"
 	"github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	controllersManagement "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
@@ -40,9 +40,6 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 		if token.Status.Token == "" || token.Spec.ClusterName == "" {
 			return token, nil
 		}
-		if token.Name != "default-token" {
-			return token, nil
-		}
 		cluster, err := CattleClusterResourceController.Get(token.Namespace, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
@@ -56,6 +53,40 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 				token.Annotations["cattle-cluster-agent-create"] = "true"
 				return RegistrationTokenResourceController.Update(token)
 			}
+		}
+		
+		if token.Name == "system" {
+			// remove default cattle-cluster-agent in gorizond
+			selector := fmt.Sprintf("gorizond-deploy=%s,token=default-token", cluster.Spec.DisplayName, )
+			deployments, err := mgmtApps.Apps().V1().Deployment().List(cluster.Spec.FleetWorkspaceName, metav1.ListOptions{LabelSelector: selector})
+			if err != nil {
+				return token, nil
+			}
+			for _, deployment := range deployments.Items {
+				err = mgmtApps.Apps().V1().Deployment().Delete(cluster.Spec.FleetWorkspaceName, deployment.Name, nil)
+				if err != nil {
+					return token, nil
+				}
+				log.Infof("deleted deployment %s (%s)", deployment.Name, cluster.Spec.FleetWorkspaceName)
+			}
+
+			secrets, err := SecretResourceController.List(cluster.Spec.FleetWorkspaceName, metav1.ListOptions{LabelSelector: selector})
+			if err != nil {
+				return token, nil
+			}
+			for _, secret := range secrets.Items {
+				err = SecretResourceController.Delete(cluster.Spec.FleetWorkspaceName, secret.Name, nil)
+				if err != nil {
+					return token, nil
+				}
+				log.Infof("deleted secret %s (%s)", secret.Name, cluster.Spec.FleetWorkspaceName)
+			}
+			token.Annotations["cattle-cluster-agent-create"] = "true"
+			return RegistrationTokenResourceController.Update(token)
+		}
+		// check for default token to create deployment
+		if token.Name != "default-token" {
+			return token, nil
 		}
 		
 		serverUrl, err := SettingResourceController.Get("server-url", metav1.GetOptions{})
@@ -78,6 +109,7 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 				Namespace: cluster.Spec.FleetWorkspaceName,
 				Labels: map[string]string{
 					"gorizond-deploy": cluster.Spec.DisplayName,
+					"token": "default-token",
 				},
 			},
 			Data: map[string][]byte{
@@ -103,6 +135,7 @@ func InitRegistrationToken(ctx context.Context, mgmtManagement *controllersManag
 				Labels: map[string]string{
 					"app":             cluster.Spec.DisplayName + "-agent",
 					"gorizond-deploy": cluster.Spec.DisplayName,
+					"token": "default-token",
 				},
 			},
 			Spec: coreAppisType.DeploymentSpec{
