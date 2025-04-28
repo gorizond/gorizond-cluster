@@ -89,7 +89,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		if obj.Namespace == "fleet-default" || obj.Namespace == "fleet-local" {
 			return nil, nil
 		}
-		
+
 		// create Namespace in cluster if not exist
 		if obj.Status.Namespace == "" {
 			_, err := NamespaceResourceController.Create(&coreType.Namespace{ObjectMeta: metav1.ObjectMeta{Name: obj.Namespace}})
@@ -357,7 +357,7 @@ func handleResponse(resp *http.Response) (string, error) {
 	return string(body), nil
 }
 
-func createKubernetesCreate(sanitizedNameApi string, obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmtApps *apps.Factory, SecretResourceController corev1.SecretController, NetworkResourceController controllersIngressv1.IngressController , GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
+func createKubernetesCreate(sanitizedNameApi string, obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmtApps *apps.Factory, SecretResourceController corev1.SecretController, NetworkResourceController controllersIngressv1.IngressController, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
 
 	secret := &coreType.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -495,7 +495,7 @@ type: kubernetes.io/service-account-token`),
 							},
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
-									coreType.ResourceCPU: resource.MustParse("10m"),
+									coreType.ResourceCPU:    resource.MustParse("10m"),
 									coreType.ResourceMemory: resource.MustParse("24Mi"),
 								},
 							},
@@ -551,11 +551,11 @@ type: kubernetes.io/service-account-token`),
 								"--disable=metrics-server",
 								"--cluster-cidr=10.44.0.0/16",
 								"--service-cidr=10.45.0.0/16",
-								"--vpn-auth=name=tailscale,joinKey=" + obj.Status.HeadscaleToken + ",controlServerURL=http://headscale-"  + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE"),
+								"--vpn-auth=name=tailscale,joinKey=" + obj.Status.HeadscaleToken + ",controlServerURL=http://headscale-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE"),
 							},
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
-									coreType.ResourceCPU: resource.MustParse("100m"),
+									coreType.ResourceCPU:    resource.MustParse("100m"),
 									coreType.ResourceMemory: resource.MustParse("512Mi"),
 								},
 							},
@@ -833,6 +833,7 @@ nginx -g 'daemon off;'`,
 			},
 			Annotations: map[string]string{
 				"nginx.ingress.kubernetes.io/backend-protocol": "HTTPS",
+				"nginx.ingress.kubernetes.io/ssl-passthrough":  "true",
 			},
 		},
 		Spec: networkingv1.IngressSpec{
@@ -863,7 +864,7 @@ nginx -g 'daemon off;'`,
 	if k3s_cert != "" {
 		ingress.Spec.TLS = []networkingv1.IngressTLS{
 			{
-				Hosts:      []string{"api-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_K3S")},
+				Hosts: []string{"api-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_K3S")},
 			},
 		}
 	}
@@ -922,7 +923,7 @@ func createHeadScaleToken(ctx context.Context, obj *gorizondv1.Cluster, Gorizond
 
 func createHeadScaleCreateUser(ctx context.Context, obj *gorizondv1.Cluster, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
 
-	err := WaitFor404(obj.Name+"-headscale."+obj.Namespace+".svc." + os.Getenv("CLUSTER_DOMAIN_HEADSCALE") + ":8080", ctx)
+	err := WaitFor404(obj.Name+"-headscale."+obj.Namespace+".svc."+os.Getenv("CLUSTER_DOMAIN_HEADSCALE")+":8080", ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1006,7 +1007,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 							},
 							Resources: coreType.ResourceRequirements{
 								Requests: coreType.ResourceList{
-									coreType.ResourceCPU: resource.MustParse("10m"),
+									coreType.ResourceCPU:    resource.MustParse("10m"),
 									coreType.ResourceMemory: resource.MustParse("128Mi"),
 								},
 							},
@@ -1140,7 +1141,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 			return nil, err
 		}
 	}
-	
+
 	hs_cert := os.Getenv("GORIZOND_CERT_HEADSCALE")
 	pathType := "ImplementationSpecific"
 	ingress := networkingv1.Ingress{
@@ -1180,7 +1181,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmt
 	if hs_cert != "" {
 		ingress.Spec.TLS = []networkingv1.IngressTLS{
 			{
-				Hosts:      []string{"headscale-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")},
+				Hosts: []string{"headscale-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")},
 			},
 		}
 	}
