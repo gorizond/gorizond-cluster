@@ -13,6 +13,7 @@ import (
 
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/apps"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
+	"github.com/rancher/wrangler/v3/pkg/generated/controllers/batch"
 	"github.com/rancher/wrangler/v3/pkg/kubeconfig"
 	"github.com/rancher/wrangler/v3/pkg/signals"
 	"github.com/rancher/wrangler/v3/pkg/start"
@@ -89,6 +90,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+		
+	mgmtBatch, err := batch.NewFactoryFromConfig(configDataCluster)
+	if err != nil {
+		panic(err)
+	}
+	
 	mgmtApps, err := apps.NewFactoryFromConfig(configDataCluster)
 	if err != nil {
 		panic(err)
@@ -101,6 +108,7 @@ func main() {
 
 	controllers.InitClusterController(ctx, mgmtGorizond, mgmtProvision, mgmtCore, mgmtApps, mgmtNetwork, dbHeadScale, dbKubernetes)
 	controllers.InitRegistrationToken(ctx, mgmtManagement, mgmtCore, mgmtApps)
+	controllers.InitReconnectCluster(ctx, mgmtProvision, mgmtBatch)
 
 	if err := start.All(ctx, 10, mgmtGorizond, mgmtProvision, mgmtApps, mgmtManagement); err != nil {
 		panic(err)
