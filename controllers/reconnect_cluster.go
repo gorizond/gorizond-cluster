@@ -62,7 +62,7 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 								{
 									Name:  "helm",
 									Image: "alpine/helm",
-									Command: []string{"helm", "uninstall", "rancher-webhook", "-n", "cattle-system", "--timeout", "30m"},
+									Command: []string{"helm", "uninstall", "rancher-webhook", "-n", "cattle-system", "--timeout", "30m", "||", "true"},
 									VolumeMounts: []coreType.VolumeMount{
 										{
 											Name:      "k3s-config",
