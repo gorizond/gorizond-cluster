@@ -83,7 +83,7 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 									Name: "k3s-config",
 									VolumeSource: coreType.VolumeSource{
 										Secret: &coreType.SecretVolumeSource{
-											SecretName: cluster.Name + "-headscale",
+											SecretName: cluster.Name + "-kubeconfig",
 										},
 									},
 								},
@@ -148,7 +148,7 @@ helm install rancher-webhook rancher-charts/rancher-webhook  -n cattle-system --
 										Name: "k3s-config",
 										VolumeSource: coreType.VolumeSource{
 											Secret: &coreType.SecretVolumeSource{
-												SecretName: cluster.Name + "-headscale",
+												SecretName: cluster.Name + "-kubeconfig",
 											},
 										},
 									},
