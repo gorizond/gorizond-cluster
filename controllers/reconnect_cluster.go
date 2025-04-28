@@ -40,11 +40,7 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 		if err != nil {
 			return nil, err
 		}
-		
-		if cluster.Annotations == nil {
-			cluster.Annotations = make(map[string]string)
-		}
-		
+		// always remove rancher-webhook if cluster disconnected (rancher agent kill/restart)
 		if cond := getCondition(d, "Ready"); cond != nil && cond.Status() == "False" && cond.Reason() == "Disconnected" {
 			job := &batchv1.Job{
 				ObjectMeta: metav1.ObjectMeta{
@@ -62,7 +58,11 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 								{
 									Name:  "helm",
 									Image: "alpine/helm",
-									Command: []string{"helm", "uninstall", "rancher-webhook", "-n", "cattle-system", "--timeout", "30m", "||", "true"},
+									Command: []string{"/bin/sh"},
+									Args: []string{
+										"-c",
+										"helm uninstall rancher-webhook -n cattle-system --timeout 30m || true",
+									},
 									VolumeMounts: []coreType.VolumeMount{
 										{
 											Name:      "k3s-config",
@@ -105,9 +105,6 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 			} else {
 				return nil, err
 			}
-			
-			cluster.Annotations["gorizond-cluster-connected"] = "false"
-			return ProvisionResourceController.Update(cluster)
 		}
 		return cluster, nil
 	})
