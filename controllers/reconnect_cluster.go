@@ -69,6 +69,13 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 											MountPath: "/root/.kube",
 										},
 									},
+									Env: []coreType.EnvVar{
+										coreType.EnvVar{
+											Name: "KUBECONFIG",	
+											Value: "/root/.kube/value",
+										},
+									},
+									ImagePullPolicy: coreType.PullIfNotPresent,
 									Resources: coreType.ResourceRequirements{
 										Requests: coreType.ResourceList{
 											coreType.ResourceCPU:    resource.MustParse("10m"),
@@ -134,6 +141,13 @@ helm install rancher-webhook rancher-charts/rancher-webhook  -n cattle-system --
 												MountPath: "/root/.kube",
 											},
 										},
+										Env: []coreType.EnvVar{
+											coreType.EnvVar{
+												Name: "KUBECONFIG",	
+												Value: "/root/.kube/value",
+											},
+										},
+										ImagePullPolicy: coreType.PullIfNotPresent,
 										Resources: coreType.ResourceRequirements{
 											Requests: coreType.ResourceList{
 												coreType.ResourceCPU:    resource.MustParse("10m"),
