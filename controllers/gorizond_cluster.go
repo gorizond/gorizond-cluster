@@ -541,6 +541,7 @@ type: kubernetes.io/service-account-token`),
 							Args: []string{
 								"--disable-agent",
 								"--node-taint=CriticalAddonsOnly=true:NoExecute",
+								"--egress-selector-mode=cluster",
 								"--https-listen-port=6443",
 								"--tls-san=api-" + domain,
 								"--tls-san=" + obj.Name + "-k3s." + obj.Namespace,
