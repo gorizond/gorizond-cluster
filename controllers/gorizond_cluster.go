@@ -22,6 +22,7 @@ import (
 	cattlev1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
 	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/apps"
+	"github.com/rancher/wrangler/v3/pkg/generated/controllers/batch"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
 	corev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"google.golang.org/grpc"
@@ -37,7 +38,7 @@ import (
 	"tailscale.com/types/key"
 )
 
-func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory, mgmtNetwork *controllersIngress.Factory, dbHeadScale *pkg.DatabaseManager, dbKubernetes *pkg.DatabaseManager) {
+func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory, mgmtNetwork *controllersIngress.Factory, mgmtBatch *batch.Factory, dbHeadScale *pkg.DatabaseManager, dbKubernetes *pkg.DatabaseManager) {
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	SecretResourceController := mgmtCore.Core().V1().Secret()
 	NamespaceResourceController := mgmtCore.Core().V1().Namespace()
@@ -170,7 +171,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		}
 		return obj, nil
 	})
-	GorizondResourceController.OnRemove(ctx, "gorizond-delete", func(key string, obj *gorizondv1.Cluster) (*gorizondv1.Cluster, error) {
+	GorizondResourceController.OnRemove(ctx, "gorizond-cleanup", func(key string, obj *gorizondv1.Cluster) (*gorizondv1.Cluster, error) {
 		selector := fmt.Sprintf("gorizond-deploy=%s", obj.Name)
 		clusters, err := mgmtProvision.Provisioning().V1().Cluster().List(obj.Namespace, metav1.ListOptions{})
 		if err != nil {
@@ -232,6 +233,18 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 				return obj, nil
 			}
 			log.Infof("deleted service %s (%s)", service.Name, obj.Namespace)
+		}
+
+		jobs, err := mgmtBatch.Batch().V1().Job().List(obj.Namespace, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			return obj, nil
+		}
+		for _, service := range jobs.Items {
+			err = mgmtBatch.Batch().V1().Job().Delete(obj.Namespace, service.Name, nil)
+			if err != nil {
+				return obj, nil
+			}
+			log.Infof("deleted jobs %s (%s)", service.Name, obj.Namespace)
 		}
 
 		if obj.Status.Cluster != "" {

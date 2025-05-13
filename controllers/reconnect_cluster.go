@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"github.com/rancher/lasso/pkg/log"
-	"github.com/rancher/wrangler/v3/pkg/data"
-	"github.com/rancher/wrangler/v3/pkg/summary"
-	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
 	cattlev1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
+	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
+	"github.com/rancher/wrangler/v3/pkg/data"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/batch"
-	coreType "k8s.io/api/core/v1"
+	"github.com/rancher/wrangler/v3/pkg/summary"
 	batchv1 "k8s.io/api/batch/v1"
+	coreType "k8s.io/api/core/v1"
 	errorsk8s "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func getCondition(d data.Object, conditionType string) *summary.Condition {
@@ -34,9 +34,9 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 		if cluster == nil {
 			return nil, nil
 		}
-			
+
 		d, err := data.Convert(cluster.DeepCopyObject())
-		
+
 		if err != nil {
 			return nil, err
 		}
@@ -46,6 +46,9 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      fmt.Sprintf("%s-helm-disconnected", cluster.Name),
 					Namespace: cluster.Namespace,
+					Labels: map[string]string{
+						"gorizond-deploy": cluster.Name,
+					},
 					Annotations: map[string]string{
 						"gorizond-agent-disconnected": "true",
 					},
@@ -56,8 +59,8 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 						Spec: coreType.PodSpec{
 							Containers: []coreType.Container{
 								{
-									Name:  "helm",
-									Image: "alpine/helm",
+									Name:    "helm",
+									Image:   "alpine/helm",
 									Command: []string{"/bin/sh"},
 									Args: []string{
 										"-c",
@@ -71,7 +74,7 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 									},
 									Env: []coreType.EnvVar{
 										coreType.EnvVar{
-											Name: "KUBECONFIG",	
+											Name:  "KUBECONFIG",
 											Value: "/root/.kube/value",
 										},
 									},
