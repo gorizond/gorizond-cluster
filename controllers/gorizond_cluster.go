@@ -78,6 +78,34 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		obj.Annotations["gorizond-cluster-bind"] = "true"
 		return ProvisionResourceController.Update(obj)
 	})
+	GorizondResourceController.OnChange(ctx, "k3s-version", func(key string, obj *gorizondv1.Cluster) (*gorizondv1.Cluster, error) {
+		if obj == nil {
+			return nil, nil
+		}
+		if obj.Status.Provisioning != "Done" {
+			return nil, nil
+		}
+		if obj.Spec.KubernetesVersion != obj.Status.K3sVersion {
+			// upgrade k3s deployment
+			deployment, err := mgmtApps.Apps().V1().Deployment().Get(obj.Namespace, obj.Name+"-k3s", metav1.GetOptions{})
+			if err != nil {
+				return nil, err
+			}
+			for i := range deployment.Spec.Template.Spec.Containers {
+				if deployment.Spec.Template.Spec.Containers[i].Name == "k3s" {
+					deployment.Spec.Template.Spec.Containers[i].Image = "rancher/k3s:" + obj.Spec.KubernetesVersion
+				}
+			}
+			_, err = mgmtApps.Apps().V1().Deployment().Update(deployment)
+			if err != nil {
+				return nil, err
+			}
+			log.Infof("Updated k3s version to %s-->%s for cluster %s/%s", obj.Status.K3sVersion, obj.Spec.KubernetesVersion, obj.Namespace, obj.Name)
+			obj.Status.K3sVersion = obj.Spec.KubernetesVersion
+			return GorizondResourceController.Update(obj)
+		}
+		return obj, nil
+	})
 	GorizondResourceController.OnChange(ctx, "gorizond-create-cluster", func(key string, obj *gorizondv1.Cluster) (*gorizondv1.Cluster, error) {
 		if obj == nil {
 			return nil, nil
@@ -893,6 +921,7 @@ nginx -g 'daemon off;'`,
 	}
 
 	obj.Status.Provisioning = "WaitKubernetesToken"
+	obj.Status.K3sVersion = obj.Spec.KubernetesVersion
 	return GorizondResourceController.Update(obj)
 }
 

@@ -26,6 +26,8 @@ spec:
                   type: string
                 k3sToken:
                   type: string
+                k3sVersion:
+                  type: string
                 headscaleToken:
                   type: string
                 namespace:

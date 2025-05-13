@@ -28,6 +28,7 @@ type ClusterStatus struct {
 	Provisioning   string `json:"provisioning"`
 	Cluster        string `json:"cluster"`
 	K3sToken       string `json:"k3sToken"`
+	K3sVersion     string `json:"k3sVersion"`
 	HeadscaleToken string `json:"headscaleToken"`
 	Namespace      string `json:"namespace"`
 }
