@@ -956,7 +956,7 @@ func WaitFor404(address string, ctx context.Context) error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for {
+	for i := 0; i < 30; i++ {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("Wait headscale %s not ready", address)
@@ -972,6 +972,7 @@ func WaitFor404(address string, ctx context.Context) error {
 			}
 		}
 	}
+	return fmt.Errorf("Wait headscale %s not ready", address)
 }
 
 func createHeadScaleCreate(obj *gorizondv1.Cluster, mgmtCore *core.Factory, mgmtApps *apps.Factory, NetworkResourceController controllersIngressv1.IngressController, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
