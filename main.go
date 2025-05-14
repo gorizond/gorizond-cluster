@@ -106,7 +106,7 @@ func main() {
 	}
 	ctx := signals.SetupSignalContext()
 
-	controllers.InitClusterController(ctx, mgmtGorizond, mgmtProvision, mgmtCore, mgmtApps, mgmtNetwork, mgmtBatch, dbHeadScale, dbKubernetes)
+	controllers.InitClusterController(ctx, mgmtGorizond, mgmtManagement, mgmtProvision, mgmtCore, mgmtApps, mgmtNetwork, mgmtBatch, dbHeadScale, dbKubernetes)
 	controllers.InitRegistrationToken(ctx, mgmtManagement, mgmtCore, mgmtApps)
 	controllers.InitReconnectCluster(ctx, mgmtProvision, mgmtBatch)
 

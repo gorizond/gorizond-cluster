@@ -19,7 +19,10 @@ import (
 	headscalev1 "github.com/juanfont/headscale/gen/go/headscale/v1"
 	"github.com/kos-v/dsnparser"
 	"github.com/rancher/lasso/pkg/log"
+	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	cattlev1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
+	controllersManagement "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
+	controllersManagementv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/apps"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/batch"
@@ -38,12 +41,15 @@ import (
 	"tailscale.com/types/key"
 )
 
-func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory, mgmtNetwork *controllersIngress.Factory, mgmtBatch *batch.Factory, dbHeadScale *pkg.DatabaseManager, dbKubernetes *pkg.DatabaseManager) {
+func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtManagement *controllersManagement.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory, mgmtNetwork *controllersIngress.Factory, mgmtBatch *batch.Factory, dbHeadScale *pkg.DatabaseManager, dbKubernetes *pkg.DatabaseManager) {
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	SecretResourceController := mgmtCore.Core().V1().Secret()
 	NamespaceResourceController := mgmtCore.Core().V1().Namespace()
 	ProvisionResourceController := mgmtProvision.Provisioning().V1().Cluster()
 	NetworkResourceController := mgmtNetwork.Networking().V1().Ingress()
+	ClusterRoleTemplateBindingController := mgmtManagement.Management().V3().ClusterRoleTemplateBinding()
+	UserController := mgmtManagement.Management().V3().User()
+	FleetWorkspaceController := mgmtManagement.Management().V3().FleetWorkspace()
 	dsnHeadScale := dsnparser.Parse(os.Getenv("DB_DSN_HEADSCALE"))
 	ProvisionResourceController.OnChange(ctx, "status-for-gorizond-cluster", func(key string, obj *cattlev1.Cluster) (*cattlev1.Cluster, error) {
 		if obj == nil {
@@ -162,6 +168,10 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			if version != obj.Spec.KubernetesVersion {
 				obj.Spec.KubernetesVersion = version
 				return GorizondResourceController.Update(obj)
+			}
+
+			if obj.Status.Provisioning == "WaitAddAdminMember" {
+				return AddAdminMember(obj, UserController, FleetWorkspaceController, GorizondResourceController, ClusterRoleTemplateBindingController)
 			}
 
 			if obj.Status.Provisioning == "WaitHeadScaleDatabase" {
@@ -1346,6 +1356,52 @@ func createHeadScaleDatabase(sanitizedNameHs string, obj *gorizondv1.Cluster, db
 	return GorizondResourceController.Update(obj)
 }
 
+func AddAdminMember(obj *gorizondv1.Cluster, UserController controllersManagementv3.UserController, FleetWorkspaceController controllersManagementv3.FleetWorkspaceController, GorizondResourceController controllersv1.ClusterController, ClusterRoleTemplateBindingController controllersManagementv3.ClusterRoleTemplateBindingController) (*gorizondv1.Cluster, error) {
+	fleetworkspace, err := FleetWorkspaceController.Get(obj.Namespace, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	for k := range fleetworkspace.Annotations {
+		if strings.HasPrefix(k, "gorizond-user.") && strings.HasSuffix(k, ".admin"){ 
+			parts := strings.SplitN(k[len("gorizond-user."):], ".", 2)
+			userID := parts[0]
+			user, err := UserController.Get(userID, metav1.GetOptions{})
+			if err != nil {
+				return nil, err
+			}
+			var principalID string
+			for _, id := range user.PrincipalIDs {
+				if !strings.HasPrefix(id, "local://") {
+					principalID = id
+					break
+				} else {
+					
+				}
+			}
+			if principalID == "" {
+				// use local 
+				principalID = "local://" + user.Name
+			}
+			newRTB := &v3.ClusterRoleTemplateBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "gorizond-crtb-",
+					Namespace:    obj.Status.Cluster,
+				},
+				ClusterName:       obj.Status.Cluster,
+				RoleTemplateName:  "cluster-owner",
+				UserName:          userID,
+				UserPrincipalName: principalID,
+			}
+			_, err = ClusterRoleTemplateBindingController.Create(newRTB)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	obj.Status.Provisioning = "WaitHeadScaleDatabase"
+	return GorizondResourceController.Update(obj)
+}
+
 func createCattleCluster(obj *gorizondv1.Cluster, mgmt *controllersProvision.Factory, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
 	newCluster := &cattlev1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1371,6 +1427,6 @@ func createCattleCluster(obj *gorizondv1.Cluster, mgmt *controllersProvision.Fac
 	}
 	log.Infof("Successfully created: %s.%s", newCluster.Namespace, newCluster.Name)
 	// obj = obj.DeepCopy()
-	obj.Status.Provisioning = "WaitHeadScaleDatabase"
+	obj.Status.Provisioning = "WaitAddAdminMember"
 	return GorizondResourceController.Update(obj)
 }
