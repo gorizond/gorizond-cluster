@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"strconv"
 
 	"github.com/gorizond/gorizond-cluster/pkg"
 	networkingv1 "github.com/gorizond/gorizond-cluster/pkg/apis/networking.k8s.io/v1"
@@ -17,6 +18,8 @@ import (
 	controllers "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
 	controllersv1 "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io/v1"
 	headscalev1 "github.com/juanfont/headscale/gen/go/headscale/v1"
+	headscaleTypes "github.com/juanfont/headscale/hscontrol/types"
+	headscaleDB "github.com/juanfont/headscale/hscontrol/db"
 	"github.com/kos-v/dsnparser"
 	"github.com/rancher/lasso/pkg/log"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
@@ -39,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
 	"tailscale.com/types/key"
+	zcache "zgo.at/zcache/v2"
 )
 
 func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtManagement *controllersManagement.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtApps *apps.Factory, mgmtNetwork *controllersIngress.Factory, mgmtBatch *batch.Factory, dbHeadScale *pkg.DatabaseManager, dbKubernetes *pkg.DatabaseManager) {
@@ -177,7 +181,11 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			if obj.Status.Provisioning == "WaitHeadScaleDatabase" {
 				return createHeadScaleDatabase(sanitizedNameHs, obj, dbHeadScale, GorizondResourceController)
 			}
-
+			
+			if obj.Status.HeadscaleToken == "" && obj.Status.Provisioning == "WaitHeadScaleMigrations" {
+				return createHeadScaleMigrations(sanitizedNameHs, obj, dsnHeadScale, GorizondResourceController)
+			}
+						
 			if obj.Status.HeadscaleToken == "" && obj.Status.Provisioning == "WaitHeadScaleConfig" {
 				return createHeadScaleConfig(sanitizedNameHs, obj, dsnHeadScale, SecretResourceController, GorizondResourceController)
 			}
@@ -1346,13 +1354,47 @@ randomize_client_port: false
 	return GorizondResourceController.Update(obj)
 }
 
+func createHeadScaleMigrations(FullSanitizedName string, obj *gorizondv1.Cluster, dsnHeadScale *dsnparser.DSN, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
+	// migrate database HeadScale
+	dsnHeadScalePort, err := strconv.Atoi(dsnHeadScale.GetPort())
+	if err != nil {
+		return nil, err
+	}
+	Database := headscaleTypes.DatabaseConfig{
+			Type: headscaleTypes.DatabasePostgres,
+			Postgres: headscaleTypes.PostgresConfig{
+				Host: dsnHeadScale.GetHost(),
+				Port: dsnHeadScalePort,
+				Name: FullSanitizedName,
+				User: dsnHeadScale.GetUser(),
+				Pass: dsnHeadScale.GetPassword(),
+				Ssl: dsnHeadScale.GetParam("sslmode"),
+			},
+		}
+	domain := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	registrationCache := zcache.New[headscaleTypes.RegistrationID, headscaleTypes.RegisterNode](
+		time.Minute * 15,
+		time.Minute * 20,
+	)
+	_, err = headscaleDB.NewHeadscaleDatabase(
+		Database,
+		"https://headscale-" + domain,
+		registrationCache,
+	)
+	if err != nil {
+		return nil, err
+	}
+	obj.Status.Provisioning = "WaitHeadScaleConfig"
+	return GorizondResourceController.Update(obj)
+}
+
 func createHeadScaleDatabase(sanitizedNameHs string, obj *gorizondv1.Cluster, dbHeadScale *pkg.DatabaseManager, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
 	log.Infof("Creating headscale database %s", sanitizedNameHs)
 	err := dbHeadScale.CreateDatabase(sanitizedNameHs)
 	if err != nil {
 		return nil, err
 	}
-	obj.Status.Provisioning = "WaitHeadScaleConfig"
+	obj.Status.Provisioning = "WaitHeadScaleMigrations"
 	return GorizondResourceController.Update(obj)
 }
 
