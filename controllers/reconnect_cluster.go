@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
+	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
 )
 
 func getCondition(d data.Object, conditionType string) *summary.Condition {
@@ -27,9 +28,10 @@ func getCondition(d data.Object, conditionType string) *summary.Condition {
 	return nil
 }
 
-func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvision.Factory, mgmtBatch *batch.Factory) {
+func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvision.Factory, mgmtBatch *batch.Factory, mgmtCore *core.Factory) {
 	ProvisionResourceController := mgmtProvision.Provisioning().V1().Cluster()
 	BatchResourceController := mgmtBatch.Batch().V1().Job()
+	SecretResourceController := mgmtCore.Core().V1().Secret()
 	ProvisionResourceController.OnChange(ctx, "gorizond-cluster-reconnect", func(key string, cluster *cattlev1.Cluster) (*cattlev1.Cluster, error) {
 		if cluster == nil {
 			return nil, nil
@@ -42,6 +44,10 @@ func InitReconnectCluster(ctx context.Context, mgmtProvision *controllersProvisi
 		}
 		// always remove rancher-webhook if cluster disconnected (rancher agent kill/restart)
 		if cond := getCondition(d, "Ready"); cond != nil && cond.Status() == "False" && cond.Reason() == "Disconnected" {
+			_, err = SecretResourceController.Get(cluster.Namespace, cluster.Name + "-kubeconfig", metav1.GetOptions{})
+			if err != nil {
+				return cluster, nil
+			}
 			job := &batchv1.Job{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      fmt.Sprintf("%s-helm-disconnected", cluster.Name),

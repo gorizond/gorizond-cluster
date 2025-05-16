@@ -108,7 +108,7 @@ func main() {
 
 	controllers.InitClusterController(ctx, mgmtGorizond, mgmtManagement, mgmtProvision, mgmtCore, mgmtApps, mgmtNetwork, mgmtBatch, dbHeadScale, dbKubernetes)
 	controllers.InitRegistrationToken(ctx, mgmtManagement, mgmtCore, mgmtApps)
-	controllers.InitReconnectCluster(ctx, mgmtProvision, mgmtBatch)
+	controllers.InitReconnectCluster(ctx, mgmtProvision, mgmtBatch, mgmtCore)
 
 	if err := start.All(ctx, 10, mgmtGorizond, mgmtProvision, mgmtApps, mgmtManagement); err != nil {
 		panic(err)
