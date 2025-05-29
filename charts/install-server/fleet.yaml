@@ -9,7 +9,7 @@ helm:
       - name: GORIZOND_DOMAIN_K3S
         value: ${ if hasKey .ClusterAnnotations "gorizond.domain.k3s" }${ get .ClusterAnnotations "gorizond.domain.k3s" }${ else }k3s.public.gorizond.io${ end }
     ingress:
-      issuer-mail: ${ if hasKey .ClusterAnnotations "cloudflare-email" }${ get .ClusterAnnotations "cloudflare-email" }${ else }admin@gorizond.io${ end }
+      issuerMail: ${ if hasKey .ClusterAnnotations "cloudflare-email" }${ get .ClusterAnnotations "cloudflare-email" }${ else }admin@gorizond.io${ end }
       annotations:
         kubernetes.io/tls-acme: 'true'
       tls: 

@@ -7,7 +7,7 @@ metadata:
     {{- include "gorizond-install-server.labels" . | nindent 4 }}
 spec:
   acme:
-    email: {{ .Values.ingress.issuer-mail }}
+    email: {{ .Values.ingress.issuerMail }}
     privateKeySecretRef:
       name: letsencrypt-production
     server: https://acme-v02.api.letsencrypt.org/directory
