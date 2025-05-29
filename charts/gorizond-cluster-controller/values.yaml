@@ -40,18 +40,12 @@ env:
     value: "mysql://root:@tcp(k3s-tidb.system-gorizond.svc.cluster.local:4000)/gorizond_truncate"
   - name: GORIZOND_DOMAIN_HEADSCALE
     value: "headscale.public.gorizond.io"
-  - name: GORIZOND_CERT_HEADSCALE
-    value: ""
   - name: GORIZOND_DOMAIN_K3S
     value: "k3s.public.gorizond.io"
-  - name: GORIZOND_CERT_K3S
-    value: ""
   - name: CLUSTER_DOMAIN_HEADSCALE
     value: "cluster.local"
   - name: CLUSTER_DOMAIN_K3S
     value: "cluster.local"
-  - name: CATTLE_CA_CHECKSUM
-    value: ""
 
 # This is for setting Kubernetes Annotations to a Pod.
 # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
