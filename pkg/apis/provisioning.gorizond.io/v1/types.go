@@ -25,6 +25,8 @@ type ClusterSpec struct {
 }
 
 type ClusterStatus struct {
+	// +kubebuilder:validation:Format=date-time
+    LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 	Provisioning   string `json:"provisioning"`
 	Cluster        string `json:"cluster"`
 	K3sToken       string `json:"k3sToken"`

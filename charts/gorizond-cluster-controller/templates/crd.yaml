@@ -32,6 +32,9 @@ spec:
                   type: string
                 namespace:
                   type: string
+                lastTransitionTime:
+                  type: string
+                  format: date-time
   scope: Namespaced
   names:
     plural: clusters
