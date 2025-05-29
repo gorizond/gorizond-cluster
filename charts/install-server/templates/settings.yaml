@@ -1,0 +1,9 @@
+{{- $firstHost := (index .Values.ingress.hosts 0).host }}
+apiVersion: management.cattle.io/v3
+kind: Setting
+metadata:
+  name: gorizond-install-server-url
+customized: true
+default: 'http://{{ $firstHost }}'
+source: ''
+value: 'http://{{ $firstHost }}'
