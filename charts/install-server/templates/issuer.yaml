@@ -1,0 +1,17 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: install-server
+  name: {{ include "gorizond-install-server.fullname" . }}
+  labels:
+    {{- include "gorizond-install-server.labels" . | nindent 4 }}
+spec:
+  acme:
+    email: {{ .Values.ingress.issuer-mail }}
+    privateKeySecretRef:
+      name: letsencrypt-production
+    server: https://acme-v02.api.letsencrypt.org/directory
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
