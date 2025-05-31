@@ -4,7 +4,7 @@
 
 The **Gorizond Kubernetes Operator** automates provisioning and managing of distributed K3s clusters integrated with Headscale for secure networking via Tailscale. By leveraging Rancher Fleet GitOps, the operator provides a unified, secure Kubernetes API accessible globally, simplifying distributed deployments and edge computing.
 
-![gorizond-cluster-controller](https://github.com/user-attachments/assets/eb8607e0-796e-448e-8ce4-04363e114a23)
+![gorizond-cluster-controller](https://github.com/user-attachments/assets/66ff313e-8ef3-49ef-b32d-852b32593333)
 
 
 ## Key Features
