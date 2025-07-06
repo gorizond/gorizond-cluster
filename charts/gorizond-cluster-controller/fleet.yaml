@@ -17,6 +17,6 @@ helm:
       - name: CLUSTER_DOMAIN_K3S
         value: ${ if hasKey .ClusterAnnotations "gorizond.cluster.domain.k3s" }${ get .ClusterAnnotations "gorizond.cluster.domain.k3s" }${ else }cluster.local${ end }
       - name: ENABLE_CONTROLLER_GORIZOND
-        value: ${ if hasKey .ClusterAnnotations "gorizond.controller.enabled" }true${ else }true${ end }
+        value: ${ if hasKey .ClusterAnnotations "gorizond.controller.enabled" }'true'${ else }'true'${ end }
       - name: ENABLE_CONTROLLER_BILLING
-        value: ${ if hasKey .ClusterAnnotations "gorizond.billing.enabled" }true${ else }false${ end }
+        value: ${ if hasKey .ClusterAnnotations "gorizond.billing.enabled" }'true'${ else }'false'${ end }
