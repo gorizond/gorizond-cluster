@@ -30,6 +30,8 @@ func init() {
 }
 
 type Interface interface {
+	Billing() BillingController
+	BillingEvent() BillingEventController
 	Cluster() ClusterController
 }
 
@@ -41,6 +43,14 @@ func New(controllerFactory controller.SharedControllerFactory) Interface {
 
 type version struct {
 	controllerFactory controller.SharedControllerFactory
+}
+
+func (v *version) Billing() BillingController {
+	return generic.NewController[*v1.Billing, *v1.BillingList](schema.GroupVersionKind{Group: "provisioning.gorizond.io", Version: "v1", Kind: "Billing"}, "billings", true, v.controllerFactory)
+}
+
+func (v *version) BillingEvent() BillingEventController {
+	return generic.NewController[*v1.BillingEvent, *v1.BillingEventList](schema.GroupVersionKind{Group: "provisioning.gorizond.io", Version: "v1", Kind: "BillingEvent"}, "billingevents", true, v.controllerFactory)
 }
 
 func (v *version) Cluster() ClusterController {

@@ -15,6 +15,8 @@ func main() {
 				PackageName: "provisioning.gorizond.io",
 				Types: []interface{}{
 					gorizondV1.Cluster{},
+					gorizondV1.Billing{},
+					gorizondV1.BillingEvent{},
 				},
 				GenerateTypes: true,
 			},

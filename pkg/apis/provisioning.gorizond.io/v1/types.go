@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -22,6 +21,7 @@ type Cluster struct {
 
 type ClusterSpec struct {
 	KubernetesVersion string `json:"kubernetesVersion"`
+	Billing string  `json:"billing"`
 }
 
 type ClusterStatus struct {
@@ -33,6 +33,41 @@ type ClusterStatus struct {
 	K3sVersion     string `json:"k3sVersion"`
 	HeadscaleToken string `json:"headscaleToken"`
 	Namespace      string `json:"namespace"`
+	Billing        string `json:"billing"`
+	LastTransitionBillingTime metav1.Time `json:"lastTransitionBillingTime,omitempty"`
+}
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type Billing struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Status            BillingStatus `json:"status,omitempty"`
+}
+
+type BillingStatus struct {
+	Balance float64 `json:"balance,omitempty"`
+	// +kubebuilder:validation:Format=date-time
+	LastChargedAt metav1.Time `json:"lastChargedAt,omitempty"`
+	LastEventId string `json:"lastEventId,omitempty"`
+}
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type BillingEvent struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Status            BillingEventStatus `json:"status,omitempty"`
+}
+
+type BillingEventStatus struct {
+	Type string `json:"type,omitempty"`
+	// +kubebuilder:validation:Format=date-time
+    TransitionTime metav1.Time `json:"transitionTime,omitempty"`
+    BillingName string `json:"billingName,omitempty"`
+	Amount          float64 `json:"amount,omitempty"`
 }
 
 // Tag represents a Docker tag

@@ -17,6 +17,8 @@ spec:
               properties:
                 kubernetesVersion:
                   type: string
+                billing:
+                  type: string
             status:
               type: object
               properties:
@@ -33,6 +35,11 @@ spec:
                 namespace:
                   type: string
                 lastTransitionTime:
+                  type: string
+                  format: date-time
+                billing:
+                  type: string
+                lastTransitionBillingTime:
                   type: string
                   format: date-time
   scope: Namespaced

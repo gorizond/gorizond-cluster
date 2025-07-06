@@ -39,3 +39,37 @@ func NewCluster(namespace, name string, obj Cluster) *Cluster {
 	obj.Namespace = namespace
 	return &obj
 }
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// BillingList is a list of Billing resources
+type BillingList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []Billing `json:"items"`
+}
+
+func NewBilling(namespace, name string, obj Billing) *Billing {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("Billing").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// BillingEventList is a list of BillingEvent resources
+type BillingEventList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []BillingEvent `json:"items"`
+}
+
+func NewBillingEvent(namespace, name string, obj BillingEvent) *BillingEvent {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("BillingEvent").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}

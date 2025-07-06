@@ -1,24 +1,28 @@
 package main
 
 import (
+	"os"
 	"flag"
 	controllers "github.com/gorizond/gorizond-cluster/controllers"
 	controllersGorizond "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
 	"github.com/joho/godotenv"
 	"github.com/rancher/lasso/pkg/log"
 	controllersManagement "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
-	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
-	
+	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"    
 	controllersFleet "github.com/rancher/rancher/pkg/generated/controllers/fleet.cattle.io"
 
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
 	"github.com/rancher/wrangler/v3/pkg/kubeconfig"
 	"github.com/rancher/wrangler/v3/pkg/signals"
 	"github.com/rancher/wrangler/v3/pkg/start"
+	"github.com/rancher/wrangler/v3/pkg/apply"
 	"k8s.io/client-go/rest"
 )
 
 func main() {
+	
+	ctx := signals.SetupSignalContext()
+	
 	err := godotenv.Load()
 	if err != nil {
 		log.Infof(".env file not found")
@@ -42,34 +46,56 @@ func main() {
 			panic(err)
 		}
 	}
+	var starters []start.Starter
+	var mgmtManagement *controllersManagement.Factory
+	var mgmtGorizond *controllersGorizond.Factory
+    if os.Getenv("ENABLE_CONTROLLER_GORIZOND") == "true" {
+		mgmtGorizond, err = controllersGorizond.NewFactoryFromConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+		mgmtProvision, err := controllersProvision.NewFactoryFromConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+		mgmtManagement, err = controllersManagement.NewFactoryFromConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+		mgmtFleet, err := controllersFleet.NewFactoryFromConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+	
+		mgmtCore, err := core.NewFactoryFromConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
 
-	mgmtGorizond, err := controllersGorizond.NewFactoryFromConfig(configRancher)
-	if err != nil {
-		panic(err)
-	}
-	mgmtProvision, err := controllersProvision.NewFactoryFromConfig(configRancher)
-	if err != nil {
-		panic(err)
-	}
-	mgmtManagement, err := controllersManagement.NewFactoryFromConfig(configRancher)
-	if err != nil {
-		panic(err)
-	}
-	mgmtFleet, err := controllersFleet.NewFactoryFromConfig(configRancher)
-	if err != nil {
-		panic(err)
-	}
-
-	mgmtCore, err := core.NewFactoryFromConfig(configRancher)
-	if err != nil {
-		panic(err)
-	}
-
-	ctx := signals.SetupSignalContext()
-
-	controllers.InitClusterController(ctx, mgmtGorizond, mgmtManagement, mgmtProvision, mgmtCore, mgmtFleet)
-
-	if err := start.All(ctx, 10, mgmtGorizond, mgmtProvision); err != nil {
+		controllers.InitClusterController(ctx, mgmtGorizond, mgmtManagement, mgmtProvision, mgmtCore, mgmtFleet)
+		starters = append(starters, mgmtGorizond, mgmtProvision)
+    }
+    if os.Getenv("ENABLE_CONTROLLER_BILLING") == "true" {
+    	mgmtManagement, err = controllersManagement.NewFactoryFromConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+		mgmtGorizond, err = controllersGorizond.NewFactoryFromConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+		
+		apply, err := apply.NewForConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+		controllers.InitBillingClusterController(ctx, mgmtManagement, mgmtGorizond)
+		controllers.InitBillingEventController(ctx, mgmtGorizond.Provisioning().V1().Billing(), mgmtGorizond.Provisioning().V1().BillingEvent(), apply, 4)
+		controllers.InitPeriodicBillingController(ctx, mgmtGorizond.Provisioning().V1().Cluster(), mgmtGorizond.Provisioning().V1().BillingEvent())
+		starters = append(starters, mgmtManagement, mgmtGorizond)
+    }
+     // start controllers
+	if err := start.All(ctx, 50, starters...); err != nil {
 		panic(err)
 	}
 

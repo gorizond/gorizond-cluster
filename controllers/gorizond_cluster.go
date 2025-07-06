@@ -279,7 +279,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			return obj, nil
 		}
 		for _, cluster := range clusters.Items {
-			// list all Clusters in workspace and remove if gorziond.Name == cluster.Name
+			// list all Clusters in workspace and remove if gorizond.Name == cluster.Name
 			if cluster.Name == obj.Name {
 				err = mgmtProvision.Provisioning().V1().Cluster().Delete(obj.Namespace, cluster.Name, nil)
 				if err != nil {

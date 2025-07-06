@@ -27,7 +27,9 @@ import (
 )
 
 var (
-	ClusterResourceName = "clusters"
+	BillingResourceName      = "billings"
+	BillingEventResourceName = "billingevents"
+	ClusterResourceName      = "clusters"
 )
 
 // SchemeGroupVersion is group version used to register these objects
@@ -51,6 +53,10 @@ var (
 // Adds the list of known types to Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
+		&Billing{},
+		&BillingList{},
+		&BillingEvent{},
+		&BillingEventList{},
 		&Cluster{},
 		&ClusterList{},
 	)

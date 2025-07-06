@@ -1,3 +1,4 @@
 .env
 skaffold.env
 .idea
+.DS_Store
