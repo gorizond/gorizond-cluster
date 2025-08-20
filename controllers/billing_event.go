@@ -8,8 +8,8 @@ import (
 
 	provv1 "github.com/gorizond/gorizond-cluster/pkg/apis/provisioning.gorizond.io/v1"
 	provcontrollers "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io/v1"
-	"github.com/rancher/wrangler/v3/pkg/apply"
 	"github.com/rancher/lasso/pkg/log"
+	"github.com/rancher/wrangler/v3/pkg/apply"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/util/workqueue"
@@ -126,8 +126,16 @@ func (h *Handler) reconcile(key billingKey) error {
 		return events[i].CreationTimestamp.Before(&events[j].CreationTimestamp)
 	})
 
-	// 4) Process the first unprocessed event
+	// 4) Filter events addressed to this billing
+	filtered := make([]*provv1.BillingEvent, 0, len(events))
 	for _, evt := range events {
+		if evt.Status.BillingName == billing.Name {
+			filtered = append(filtered, evt)
+		}
+	}
+
+	// 5) Process the first unprocessed event for this billing
+	for _, evt := range filtered {
 		// Skip if this evt is already processed (same UID as LastEventId)
 		if billing.Status.LastEventId == string(evt.UID) {
 			continue
