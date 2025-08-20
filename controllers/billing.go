@@ -4,9 +4,10 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"time"
 
-	gorizondControllers "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
 	provv1 "github.com/gorizond/gorizond-cluster/pkg/apis/provisioning.gorizond.io/v1"
+	gorizondControllers "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
 	"github.com/rancher/lasso/pkg/log"
 	managementv1 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	controllersManagement "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
@@ -18,6 +19,162 @@ func InitBillingClusterController(ctx context.Context, mgmtProvision *controller
 	ProvisionResourceController := mgmtProvision.Management().V3().Cluster()
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	BillingController := mgmtGorizond.Provisioning().V1().Billing()
+
+	const billingFinalizer = "provisioning.gorizond.io/billing-balance-transfer"
+
+	// Finalizer and balance transfer on Billing deletion
+	BillingController.OnChange(ctx, "billing-balance-transfer", func(key string, billing *provv1.Billing) (*provv1.Billing, error) {
+		if billing == nil {
+			return nil, nil
+		}
+
+		// Ensure finalizer is added on non-deleting objects
+		if billing.DeletionTimestamp == nil {
+			has := false
+			for _, f := range billing.Finalizers {
+				if f == billingFinalizer {
+					has = true
+					break
+				}
+			}
+			if !has {
+				copyObj := billing.DeepCopy()
+				copyObj.Finalizers = append(copyObj.Finalizers, billingFinalizer)
+				updated, err := BillingController.Update(copyObj)
+				if err != nil {
+					log.Errorf("Failed to add finalizer to billing %s/%s: %v", billing.Namespace, billing.Name, err)
+					return billing, err
+				}
+				return updated, nil
+			}
+			return billing, nil
+		}
+
+		// Deletion: pre-check that the billing is not used by clusters
+		clusters, err := GorizondResourceController.Cache().List(billing.Namespace, labels.Everything())
+		if err != nil {
+			log.Errorf("Failed to list clusters in namespace %s: %v", billing.Namespace, err)
+			return billing, err
+		}
+		for _, c := range clusters {
+			if c.Spec.Billing == billing.Name {
+				// Billing is in use — block deletion and keep the finalizer
+				log.Errorf("Cannot delete billing %s/%s: it is used by cluster %s/%s", billing.Namespace, billing.Name, c.Namespace, c.Name)
+				// Re-enqueue to retry later to avoid indefinite stall
+				BillingController.EnqueueAfter(billing.Namespace, billing.Name, 30*time.Second)
+				return billing, nil
+			}
+		}
+
+		// Deletion: transfer balance
+		if billing.Status.Balance == 0 {
+			// Nothing to transfer — remove the finalizer
+			copyObj := billing.DeepCopy()
+			newFinalizers := make([]string, 0, len(copyObj.Finalizers))
+			for _, f := range copyObj.Finalizers {
+				if f != billingFinalizer {
+					newFinalizers = append(newFinalizers, f)
+				}
+			}
+			copyObj.Finalizers = newFinalizers
+			updated, err := BillingController.Update(copyObj)
+			if err != nil {
+				log.Errorf("Failed to remove finalizer from billing %s/%s: %v", billing.Namespace, billing.Name, err)
+				return billing, err
+			}
+			return updated, nil
+		}
+
+		// Find a target billing in the same namespace
+		list, err := BillingController.Cache().List(billing.Namespace, labels.Everything())
+		if err != nil {
+			log.Errorf("Failed to list billings in namespace %s: %v", billing.Namespace, err)
+			return billing, err
+		}
+		var target *provv1.Billing
+		for _, b := range list {
+			if b.Name == billing.Name {
+				continue
+			}
+			if b.DeletionTimestamp == nil {
+				// Choose deterministically by minimal name
+				if target == nil || b.Name < target.Name {
+					target = b
+				}
+			}
+		}
+
+		// If no target found, use/create a recovered billing
+		if target == nil {
+			for _, b := range list {
+				if b.DeletionTimestamp == nil && b.Labels != nil && b.Labels["provisioning.gorizond.io/recovered"] == "true" {
+					target = b
+					break
+				}
+			}
+			if target == nil {
+				newBilling := &provv1.Billing{
+					ObjectMeta: v1.ObjectMeta{
+						GenerateName: "recovered-",
+						Namespace:    billing.Namespace,
+						Labels: map[string]string{
+							"provisioning.gorizond.io/recovered": "true",
+						},
+					},
+				}
+				_, err := BillingController.Create(newBilling)
+				if err != nil {
+					log.Errorf("Failed to create recovered billing in namespace %s: %v", billing.Namespace, err)
+					return billing, err
+				}
+				// Give the cache time to observe the new object and retry
+				BillingController.EnqueueAfter(billing.Namespace, billing.Name, 1*time.Second)
+				return billing, nil
+			}
+		}
+
+		// Transfer balance (fetch the latest target version)
+		targetCur, err := BillingController.Get(target.Namespace, target.Name, v1.GetOptions{})
+		if err != nil {
+			log.Errorf("Failed to get target billing %s/%s: %v", target.Namespace, target.Name, err)
+			return billing, err
+		}
+		targetCopy := targetCur.DeepCopy()
+		targetCopy.Status.Balance += billing.Status.Balance
+		targetCopy.Status.LastChargedAt = v1.Now()
+		if targetCopy.Status.LastEventId == "" {
+			targetCopy.Status.LastEventId = "transfer"
+		}
+		if _, err := BillingController.UpdateStatus(targetCopy); err != nil {
+			log.Errorf("Failed to update target billing %s/%s status: %v", targetCopy.Namespace, targetCopy.Name, err)
+			return billing, err
+		}
+
+		// Zero out the source balance (idempotent)
+		sourceCopy := billing.DeepCopy()
+		sourceCopy.Status.Balance = 0
+		sourceCopy.Status.LastChargedAt = v1.Now()
+		if _, err := BillingController.UpdateStatus(sourceCopy); err != nil {
+			log.Errorf("Failed to zero out source billing %s/%s status: %v", sourceCopy.Namespace, sourceCopy.Name, err)
+			return billing, err
+		}
+
+		// Remove the finalizer
+		copyObj := billing.DeepCopy()
+		newFinalizers := make([]string, 0, len(copyObj.Finalizers))
+		for _, f := range copyObj.Finalizers {
+			if f != billingFinalizer {
+				newFinalizers = append(newFinalizers, f)
+			}
+		}
+		copyObj.Finalizers = newFinalizers
+		updated, err := BillingController.Update(copyObj)
+		if err != nil {
+			log.Errorf("Failed to remove finalizer from billing %s/%s after transfer: %v", billing.Namespace, billing.Name, err)
+			return billing, err
+		}
+		return updated, nil
+	})
 
 	billingFreeNodeCountStr := os.Getenv("BILLING_FREE_NODE_COUNT")
 	if billingFreeNodeCountStr == "" {
@@ -92,30 +249,33 @@ func InitBillingClusterController(ctx context.Context, mgmtProvision *controller
 				return cluster, err
 			}
 			log.Infof("Updated cluster %s billing status to %s", cluster.Name, billingStatus)
+			// Enqueue the corresponding billing only when status actually changes
+			if updatedCluster.Spec.Billing != "" {
+				BillingController.Enqueue(updatedCluster.Namespace, updatedCluster.Spec.Billing)
+			}
 			return updatedCluster, nil
 		}
-
 		return cluster, nil
 	})
 
-	// Handler for changes in Billing to reconcile clusters
+	// Handler for changes in Billing to reconcile only dependent clusters
 	BillingController.OnChange(ctx, "billing-change", func(key string, billing *provv1.Billing) (*provv1.Billing, error) {
 		if billing == nil {
 			return nil, nil
 		}
 
-		// Get all clusters in the namespace
+		// Get only clusters in the namespace and enqueue those attached to this billing
 		clusters, err := GorizondResourceController.Cache().List(billing.Namespace, labels.Everything())
 		if err != nil {
 			log.Errorf("Failed to list clusters in namespace %s: %v", billing.Namespace, err)
 			return nil, err
 		}
 
-		// Reconcile each cluster
-		// TODO: Use only clusters attached to this billing
 		for _, cluster := range clusters {
-			GorizondResourceController.Enqueue(cluster.Namespace, cluster.Name)
-			log.Infof("Enqueued cluster %s/%s for reconciliation due to billing change", cluster.Namespace, cluster.Name)
+			if cluster.Spec.Billing == billing.Name {
+				GorizondResourceController.Enqueue(cluster.Namespace, cluster.Name)
+				log.Infof("Enqueued cluster %s/%s for reconciliation due to billing change", cluster.Namespace, cluster.Name)
+			}
 		}
 
 		return nil, nil
