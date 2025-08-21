@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -27,14 +29,13 @@ import (
 	controllersProvisionv1 "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io/v1"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
 	corev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
-	batchv1 "k8s.io/api/batch/v1"
-	"k8s.io/utils/pointer"
 	"github.com/rancher/wrangler/v3/pkg/kubeconfig"
+	batchv1 "k8s.io/api/batch/v1"
 	coreType "k8s.io/api/core/v1"
 	errorsk8s "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	"tailscale.com/types/key"
+	"k8s.io/utils/pointer"
 )
 
 const k3sHelmChart = `
@@ -152,41 +153,39 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 				return nil, err
 			}
 			yamlContent := fmt.Sprintf(k3sHelmChart,
-			obj.Name,
-			obj.Namespace,
-			k3sHelmChartVersion,
-			obj.Spec.KubernetesVersion,
-			strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
-			obj.Status.HeadscaleToken,
-			HSServerURL,
-			k3sDomain)
+				obj.Name,
+				obj.Namespace,
+				k3sHelmChartVersion,
+				obj.Spec.KubernetesVersion,
+				strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
+				obj.Status.HeadscaleToken,
+				HSServerURL,
+				k3sDomain)
 			encodedContent, err := compressAndEncode(yamlContent)
 			if err != nil {
 				return nil, err
 			}
-			headscaleResource := fleetTypev1alpha1.BundleResource{}
-			for _, resource := range fleetBundle.Spec.Resources {
-				if resource.Name == "helm-headscale.yaml" {
-					headscaleResource = resource
+			// Update the existing helm-k3s.yaml resource or add it if it does not exist,
+			// without affecting other resources (for example, helm-headscale.yaml)
+			updated := false
+			for i := range fleetBundle.Spec.Resources {
+				if fleetBundle.Spec.Resources[i].Name == "helm-k3s.yaml" {
+					fleetBundle.Spec.Resources[i].Content = encodedContent
+					fleetBundle.Spec.Resources[i].Encoding = "base64+gz"
+					updated = true
+					break
 				}
 			}
-			
-			fleetBundle.Spec.Resources = []fleetTypev1alpha1.BundleResource{
-				headscaleResource, 
-				fleetTypev1alpha1.BundleResource{
-					Content: encodedContent,
-					Name: "helm-k3s.yaml",
+			if !updated {
+				fleetBundle.Spec.Resources = append(fleetBundle.Spec.Resources, fleetTypev1alpha1.BundleResource{
+					Content:  encodedContent,
+					Name:     "helm-k3s.yaml",
 					Encoding: "base64+gz",
-				},
+				})
 			}
-			FleetBundleController.Update(fleetBundle)
-			FleetBundleController.Update(fleetBundle)
-			fleetBundle.Spec.Resources = append(fleetBundle.Spec.Resources, fleetTypev1alpha1.BundleResource{
-				Content: encodedContent,
-				Name: "helm-k3s.yaml",
-				Encoding: "base64+gz",
-			})
-			FleetBundleController.Update(fleetBundle)
+			if _, err := FleetBundleController.Update(fleetBundle); err != nil {
+				return nil, err
+			}
 			log.Infof("Updated k3s version to %s-->%s for cluster %s/%s", obj.Status.K3sVersion, obj.Spec.KubernetesVersion, obj.Namespace, obj.Name)
 			obj.Status.K3sVersion = obj.Spec.KubernetesVersion
 			return GorizondResourceController.Update(obj)
@@ -258,7 +257,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			if obj.Status.HeadscaleToken == "" && obj.Status.Provisioning == "WaitHeadScaleCreate" {
 				return createHeadScaleCreate(obj, FleetBundleController, GorizondResourceController, sanitizedNameHs)
 			}
-			
+
 			if obj.Status.HeadscaleToken == "" && obj.Status.Provisioning == "WaitHeadScaleToken" {
 				return createHeadScaleToken(obj, ctx, SecretResourceController, ProvisionResourceController, GorizondResourceController)
 			}
@@ -289,7 +288,6 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			}
 		}
 
-	
 		bundle, err := FleetBundleController.List("fleet-default", metav1.ListOptions{LabelSelector: selector})
 		if err != nil {
 			return obj, nil
@@ -302,7 +300,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			log.Infof("deleted bundle %s (%s)", service.Name, "fleet-default")
 		}
 		log.Infof("Successfully remove: %s.%s", obj.Namespace, obj.Name)
-		
+
 		sanitizedNameHs := strings.NewReplacer(
 			".", "_",
 			"-", "_",
@@ -319,14 +317,14 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			"#", "_",
 			"$", "_",
 		).Replace(obj.Namespace + "_api_" + obj.Status.Cluster)
-		
-		runtimeClusters, err := ProvisionResourceController.List("fleet-default", metav1.ListOptions{ LabelSelector :"gorizond.runtime=true"})
+
+		runtimeClusters, err := ProvisionResourceController.List("fleet-default", metav1.ListOptions{LabelSelector: "gorizond.runtime=true"})
 		if err != nil {
 			return nil, err
 		}
-		
+
 		for _, cluster := range runtimeClusters.Items {
-			secret, err := SecretResourceController.Get("fleet-default", cluster.Name + "-kubeconfig", metav1.GetOptions{})
+			secret, err := SecretResourceController.Get("fleet-default", cluster.Name+"-kubeconfig", metav1.GetOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -342,65 +340,65 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			}
 			clientset, err := pkg.CreateClientset(clientConfig)
 			if err != nil {
-   				return nil, err
-		   	}
-			
+				return nil, err
+			}
+
 			job := &batchv1.Job{
-			    ObjectMeta: metav1.ObjectMeta{
-			        Name: "drop-db-headscale-" + obj.Status.Cluster,
-			        Namespace: "default",
-			    },
-			    Spec: batchv1.JobSpec{
-					TTLSecondsAfterFinished: pointer.Int32(20), // Job will be deleted 100 seconds after it 
-			        Template: coreType.PodTemplateSpec{
-			            Spec: coreType.PodSpec{
-			                Containers: []coreType.Container{
-			                    {
-			                        Name:  "drop-db",
-			                        Image: imageFromDsn(os.Getenv("DB_DSN_HEADSCALE")),
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "drop-db-headscale-" + obj.Status.Cluster,
+					Namespace: "default",
+				},
+				Spec: batchv1.JobSpec{
+					TTLSecondsAfterFinished: pointer.Int32(20), // Job will be deleted 100 seconds after it
+					Template: coreType.PodTemplateSpec{
+						Spec: coreType.PodSpec{
+							Containers: []coreType.Container{
+								{
+									Name:            "drop-db",
+									Image:           imageFromDsn(os.Getenv("DB_DSN_HEADSCALE")),
 									ImagePullPolicy: coreType.PullIfNotPresent,
-			                        Command: []string{
-			                            "/bin/sh",
-			                            "-c",
-			                        },
+									Command: []string{
+										"/bin/sh",
+										"-c",
+									},
 									Args: ArgsFromDsn(os.Getenv("DB_DSN_HEADSCALE"), sanitizedNameHs),
-			                    },
-			                },
-			                RestartPolicy: coreType.RestartPolicyNever,
-			            },
-			        },
-			    },
+								},
+							},
+							RestartPolicy: coreType.RestartPolicyNever,
+						},
+					},
+				},
 			}
 			_, err = clientset.BatchV1().Jobs("default").Create(ctx, job, metav1.CreateOptions{})
 			if err != nil {
 				return nil, err
 			}
-			
+
 			job = &batchv1.Job{
-			    ObjectMeta: metav1.ObjectMeta{
-			        Name: "drop-db-k3s-" + obj.Status.Cluster,
-			        Namespace: "default",
-			    },
-			    Spec: batchv1.JobSpec{
-					TTLSecondsAfterFinished: pointer.Int32(20), // Job will be deleted 100 seconds after it 
-			        Template: coreType.PodTemplateSpec{
-			            Spec: coreType.PodSpec{
-			                Containers: []coreType.Container{
-			                    {
-			                        Name:  "drop-db",
-			                        Image: imageFromDsn(os.Getenv("DB_DSN_KUBERNETES")),
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "drop-db-k3s-" + obj.Status.Cluster,
+					Namespace: "default",
+				},
+				Spec: batchv1.JobSpec{
+					TTLSecondsAfterFinished: pointer.Int32(20), // Job will be deleted 100 seconds after it
+					Template: coreType.PodTemplateSpec{
+						Spec: coreType.PodSpec{
+							Containers: []coreType.Container{
+								{
+									Name:            "drop-db",
+									Image:           imageFromDsn(os.Getenv("DB_DSN_KUBERNETES")),
 									ImagePullPolicy: coreType.PullIfNotPresent,
-			                        Command: []string{
-			                            "/bin/sh",
-			                            "-c",
-			                        },
+									Command: []string{
+										"/bin/sh",
+										"-c",
+									},
 									Args: ArgsFromDsn(os.Getenv("DB_DSN_KUBERNETES"), sanitizedNameApi),
-			                    },
-			                },
-			                RestartPolicy: coreType.RestartPolicyNever,
-			            },
-			        },
-			    },
+								},
+							},
+							RestartPolicy: coreType.RestartPolicyNever,
+						},
+					},
+				},
 			}
 			_, err = clientset.BatchV1().Jobs("default").Create(ctx, job, metav1.CreateOptions{})
 			if err != nil {
@@ -411,38 +409,38 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 	})
 }
 
-func ArgsFromDsn(dns string, database string) ([]string) {
-	if strings.HasPrefix(dns,  "postgres://") {
+func ArgsFromDsn(dns string, database string) []string {
+	if strings.HasPrefix(dns, "postgres://") {
 		return []string{
 			"psql " + dns + " -c \"INSERT INTO table_to_deletes (name) VALUES ('" + database + "');\"",
 		}
 	}
-	if strings.HasPrefix(dns,  "mysql://") {
+	if strings.HasPrefix(dns, "mysql://") {
 		dnsParse := dsnparser.Parse(dns)
 		return []string{
-			"mysql --user=" + dnsParse.GetUser() + " --host=" + dnsParse.GetHost() + " --port=" + dnsParse.GetPort() + " --password=" + dnsParse.GetPassword() + " --database=" + dnsParse.GetPath() + " -e \"INSERT INTO "+dnsParse.GetPath()+".table_to_deletes (name) VALUES ('" + database + "');\"",
+			"mysql --user=" + dnsParse.GetUser() + " --host=" + dnsParse.GetHost() + " --port=" + dnsParse.GetPort() + " --password=" + dnsParse.GetPassword() + " --database=" + dnsParse.GetPath() + " -e \"INSERT INTO " + dnsParse.GetPath() + ".table_to_deletes (name) VALUES ('" + database + "');\"",
 		}
 	}
 	return []string{"ls"}
 }
 
-func imageFromDsn(dns string) (string) {
-	if strings.HasPrefix(dns,  "postgres://") {
+func imageFromDsn(dns string) string {
+	if strings.HasPrefix(dns, "postgres://") {
 		return "postgres:alpine"
 	}
-	if strings.HasPrefix(dns,  "mysql://") {
+	if strings.HasPrefix(dns, "mysql://") {
 		return "mysql"
 	}
 	return "busybox"
 }
 
-func createKubernetesToken(obj *gorizondv1.Cluster, ctx context.Context,  SecretResourceController corev1.SecretController, ProvisionResourceController controllersProvisionv1.ClusterController, GorizondResourceController controllersv1.ClusterController, RegistrationTokenResourceController controllersManagementv3.ClusterRegistrationTokenController) (*gorizondv1.Cluster, error) {
-	clusters, err := ProvisionResourceController.List("fleet-default", metav1.ListOptions{ LabelSelector :"gorizond.runtime=true"})
+func createKubernetesToken(obj *gorizondv1.Cluster, ctx context.Context, SecretResourceController corev1.SecretController, ProvisionResourceController controllersProvisionv1.ClusterController, GorizondResourceController controllersv1.ClusterController, RegistrationTokenResourceController controllersManagementv3.ClusterRegistrationTokenController) (*gorizondv1.Cluster, error) {
+	clusters, err := ProvisionResourceController.List("fleet-default", metav1.ListOptions{LabelSelector: "gorizond.runtime=true"})
 	if err != nil {
 		return nil, err
 	}
 	for _, cluster := range clusters.Items {
-		secret, err := SecretResourceController.Get("fleet-default", cluster.Name + "-kubeconfig", metav1.GetOptions{})
+		secret, err := SecretResourceController.Get("fleet-default", cluster.Name+"-kubeconfig", metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -457,55 +455,55 @@ func createKubernetesToken(obj *gorizondv1.Cluster, ctx context.Context,  Secret
 			return nil, err
 		}
 		// parameters headscalek3s
-	  	namespace := obj.Status.Namespace
+		namespace := obj.Status.Namespace
 		deploymentName := obj.Name + "-k3s"
 		containerName := "k3s"
-					
+
 		clientset, err := pkg.CreateClientset(clientConfig)
 		if err != nil {
-   			return nil, err
-	   	}
-					
+			return nil, err
+		}
+
 		podName, err, wait := pkg.GetPodName(clientset, ctx, namespace, deploymentName, containerName)
 		if wait {
 			time.Sleep(5 * time.Second)
 			obj.Status.LastTransitionTime = metav1.NewTime(time.Now().UTC())
 			return GorizondResourceController.Update(obj)
 		}
-		
+
 		if err != nil {
 			return nil, err
 		}
-		
- 		command := []string{"cat", "/var/lib/rancher/k3s/server/token"}
+
+		command := []string{"cat", "/var/lib/rancher/k3s/server/token"}
 		stdout, _, err := pkg.ExecCommand(clientConfig, clientset, namespace, podName, containerName, command)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		if stdout == "" {
 			time.Sleep(5 * time.Second)
 			obj.Status.LastTransitionTime = metav1.NewTime(time.Now().UTC())
 			return GorizondResourceController.Update(obj)
 		}
-		
+
 		// Add rancher registration to k3s
 		registration, err := RegistrationTokenResourceController.Get(obj.Status.Cluster, "default-token", metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
-		
+
 		command = strings.Split(registration.Status.Command, " ")
 		_, _, err = pkg.ExecCommand(clientConfig, clientset, namespace, podName, containerName, command)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		obj.Status.K3sToken = removeEmptyLines(stdout)
 		obj.Status.Provisioning = "Done"
 		break
 	}
-	
+
 	return GorizondResourceController.Update(obj)
 }
 
@@ -518,21 +516,21 @@ func createKubernetesCreate(obj *gorizondv1.Cluster, FleetBundleController contr
 		return nil, err
 	}
 	yamlContent := fmt.Sprintf(k3sHelmChart,
-	obj.Name,
-	obj.Namespace,
-	k3sHelmChartVersion,
-	obj.Spec.KubernetesVersion,
-	strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
-	obj.Status.HeadscaleToken,
-	HSServerURL,
-	k3sDomain)
+		obj.Name,
+		obj.Namespace,
+		k3sHelmChartVersion,
+		obj.Spec.KubernetesVersion,
+		strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
+		obj.Status.HeadscaleToken,
+		HSServerURL,
+		k3sDomain)
 	encodedContent, err := compressAndEncode(yamlContent)
 	if err != nil {
 		return nil, err
 	}
 	fleetBundle.Spec.Resources = append(fleetBundle.Spec.Resources, fleetTypev1alpha1.BundleResource{
-		Content: encodedContent,
-		Name: "helm-k3s.yaml",
+		Content:  encodedContent,
+		Name:     "helm-k3s.yaml",
 		Encoding: "base64+gz",
 	})
 	FleetBundleController.Update(fleetBundle)
@@ -541,13 +539,13 @@ func createKubernetesCreate(obj *gorizondv1.Cluster, FleetBundleController contr
 	return GorizondResourceController.Update(obj)
 }
 
-func createHeadScaleToken(obj *gorizondv1.Cluster, ctx context.Context,  SecretResourceController corev1.SecretController, ProvisionResourceController controllersProvisionv1.ClusterController, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
-	clusters, err := ProvisionResourceController.List("fleet-default", metav1.ListOptions{ LabelSelector :"gorizond.runtime=true"})
+func createHeadScaleToken(obj *gorizondv1.Cluster, ctx context.Context, SecretResourceController corev1.SecretController, ProvisionResourceController controllersProvisionv1.ClusterController, GorizondResourceController controllersv1.ClusterController) (*gorizondv1.Cluster, error) {
+	clusters, err := ProvisionResourceController.List("fleet-default", metav1.ListOptions{LabelSelector: "gorizond.runtime=true"})
 	if err != nil {
 		return nil, err
 	}
 	for _, cluster := range clusters.Items {
-		secret, err := SecretResourceController.Get("fleet-default", cluster.Name + "-kubeconfig", metav1.GetOptions{})
+		secret, err := SecretResourceController.Get("fleet-default", cluster.Name+"-kubeconfig", metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -561,17 +559,16 @@ func createHeadScaleToken(obj *gorizondv1.Cluster, ctx context.Context,  SecretR
 		if err != nil {
 			return nil, err
 		}
-		// parameters headscale 
-	  	namespace := obj.Status.Namespace
+		// parameters headscale
+		namespace := obj.Status.Namespace
 		deploymentName := obj.Name + "-headscale"
 		containerName := "headscale"
-	    command := []string{"headscale", "configtest"}
-					
+
 		clientset, err := pkg.CreateClientset(clientConfig)
 		if err != nil {
-   			return nil, err
-	   	}
-					
+			return nil, err
+		}
+
 		podName, err, wait := pkg.GetPodName(clientset, ctx, namespace, deploymentName, containerName)
 		if wait {
 			time.Sleep(5 * time.Second)
@@ -581,74 +578,93 @@ func createHeadScaleToken(obj *gorizondv1.Cluster, ctx context.Context,  SecretR
 		if err != nil {
 			return nil, err
 		}
-		
+
+		command := []string{"headscale", "configtest"}
 		_, _, err = pkg.ExecCommand(clientConfig, clientset, namespace, podName, containerName, command)
 		if err != nil {
 			return nil, err
 		}
-		
-		
- 		command = []string{"headscale", "users", "create", "gorizond"}
+
+		command = []string{"headscale", "users", "create", "gorizond"}
 		_, _, err = pkg.ExecCommand(clientConfig, clientset, namespace, podName, containerName, command)
 		if err != nil {
-			return nil, err
+			// Check if the error is related to exit code 1 (user already exists)
+			// or another error, try to check the existence of the user via headscale users list
+			log.Infof("Error while creating user gorizond: %v", err)
+			commandCheck := []string{"headscale", "users", "list"}
+			stdoutCheck, _, errCheck := pkg.ExecCommand(clientConfig, clientset, namespace, podName, containerName, commandCheck)
+			if errCheck != nil {
+				return nil, fmt.Errorf("error while checking existence of user gorizond: %v", errCheck)
+			}
+			// Check if the user gorizond is present in the list
+			if !strings.Contains(stdoutCheck, "gorizond") {
+				return nil, fmt.Errorf("user gorizond not found after creation attempt: %v", err)
+			}
+			// If the user is found, continue execution
 		}
-		
- 		command = []string{"headscale", "preauthkeys", "create", "--user", "1", "--reusable", "--expiration", "100y"}
+
+		command = []string{"headscale", "preauthkeys", "create", "--user", "1", "--reusable", "--expiration", "100y"}
 		stdout, _, err := pkg.ExecCommand(clientConfig, clientset, namespace, podName, containerName, command)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		obj.Status.HeadscaleToken = removeEmptyLines(stdout)
 		obj.Status.Provisioning = "WaitKubernetesCreate"
 		break
 	}
-	
+
 	return GorizondResourceController.Update(obj)
 }
 
 func removeEmptyLines(s string) string {
-    lines := strings.Split(s, "\n")
-    var nonEmptyLines []string
-    for _, line := range lines {
-        if strings.TrimSpace(line) != "" {
-            nonEmptyLines = append(nonEmptyLines, line)
-        }
-    }
-    return strings.Join(nonEmptyLines, "\n")
+	lines := strings.Split(s, "\n")
+	var nonEmptyLines []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			nonEmptyLines = append(nonEmptyLines, line)
+		}
+	}
+	return strings.Join(nonEmptyLines, "\n")
+}
+
+func generateNoisePrivateHex() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func createHeadScaleCreate(obj *gorizondv1.Cluster, FleetBundleController controllersFleetv1alpha1.BundleController, GorizondResourceController controllersv1.ClusterController, sanitizedNameHs string) (*gorizondv1.Cluster, error) {
-	machineKey := key.NewMachine()
-	machineKeyStr, err := machineKey.MarshalText()
+	noisePrivateHex, err := generateNoisePrivateHex()
 	if err != nil {
 		return nil, err
 	}
 	domain := "headscale-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
-	
+
 	dsnHeadScale := dsnparser.Parse(os.Getenv("DB_DSN_HEADSCALE"))
 	yamlContent := fmt.Sprintf(headscaleHelmChart,
-	obj.Name,
-	obj.Namespace,
-	headscaleHelmChartVersion,
-	dsnHeadScale.GetHost(),
-	sanitizedNameHs,
-	dsnHeadScale.GetPassword(),
-	dsnHeadScale.GetPort(),
-	dsnHeadScale.GetUser(), 
-	domain, string(machineKeyStr))
+		obj.Name,
+		obj.Namespace,
+		headscaleHelmChartVersion,
+		dsnHeadScale.GetHost(),
+		sanitizedNameHs,
+		dsnHeadScale.GetPassword(),
+		dsnHeadScale.GetPort(),
+		dsnHeadScale.GetUser(),
+		domain, "privkey:"+noisePrivateHex)
 	encodedContent, err := compressAndEncode(yamlContent)
-    if err != nil {
-        return nil, err
-    }
+	if err != nil {
+		return nil, err
+	}
 	bundle := &fleetTypev1alpha1.Bundle{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster,
 			Namespace: "fleet-default",
 			Labels: map[string]string{
 				"gorizond-deploy": obj.Name,
-				"workspace": obj.Namespace,
+				"workspace":       obj.Namespace,
 			},
 		},
 		Spec: fleetTypev1alpha1.BundleSpec{
@@ -657,7 +673,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, FleetBundleController contro
 					Conditions: []map[string]string{
 						{
 							"status": "False",
-	        				"type": "Failed",
+							"type":   "Failed",
 						},
 					},
 				},
@@ -682,8 +698,8 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, FleetBundleController contro
 			},
 			Resources: []fleetTypev1alpha1.BundleResource{
 				fleetTypev1alpha1.BundleResource{
-					Content: encodedContent,
-					Name: "helm-headscale.yaml",
+					Content:  encodedContent,
+					Name:     "helm-headscale.yaml",
 					Encoding: "base64+gz",
 				},
 			},
@@ -698,21 +714,21 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, FleetBundleController contro
 			return nil, err
 		}
 	}
-	
+
 	obj.Status.Provisioning = "WaitHeadScaleToken"
 	return GorizondResourceController.Update(obj)
 }
 
 func compressAndEncode(content string) (string, error) {
-    var buf bytes.Buffer
-    gz := gzip.NewWriter(&buf)
-    if _, err := gz.Write([]byte(content)); err != nil {
-        return "", err
-    }
-    if err := gz.Close(); err != nil {
-        return "", err
-    }
-    return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write([]byte(content)); err != nil {
+		return "", err
+	}
+	if err := gz.Close(); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
 func AddAdminMember(obj *gorizondv1.Cluster, UserController controllersManagementv3.UserController, FleetWorkspaceController controllersManagementv3.FleetWorkspaceController, GorizondResourceController controllersv1.ClusterController, ClusterRoleTemplateBindingController controllersManagementv3.ClusterRoleTemplateBindingController) (*gorizondv1.Cluster, error) {
@@ -721,7 +737,7 @@ func AddAdminMember(obj *gorizondv1.Cluster, UserController controllersManagemen
 		return nil, err
 	}
 	for k := range fleetworkspace.Annotations {
-		if strings.HasPrefix(k, "gorizond-user.") && strings.HasSuffix(k, ".admin"){ 
+		if strings.HasPrefix(k, "gorizond-user.") && strings.HasSuffix(k, ".admin") {
 			parts := strings.SplitN(k[len("gorizond-user."):], ".", 2)
 			userID := parts[0]
 			user, err := UserController.Get(userID, metav1.GetOptions{})
@@ -734,11 +750,11 @@ func AddAdminMember(obj *gorizondv1.Cluster, UserController controllersManagemen
 					principalID = id
 					break
 				} else {
-					
+
 				}
 			}
 			if principalID == "" {
-				// use local 
+				// use local
 				principalID = "local://" + user.Name
 			}
 			newRTB := &v3.ClusterRoleTemplateBinding{
