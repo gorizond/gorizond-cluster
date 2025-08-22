@@ -85,6 +85,20 @@ spec:
 const k3sHelmChartVersion = "0.1.3"
 const headscaleHelmChartVersion = "0.1.14"
 
+func getK3sChartVersion() string {
+	if v := os.Getenv("K3S_HELM_CHART_VERSION"); v != "" {
+		return v
+	}
+	return k3sHelmChartVersion
+}
+
+func getHeadscaleChartVersion() string {
+	if v := os.Getenv("HEADSCALE_HELM_CHART_VERSION"); v != "" {
+		return v
+	}
+	return headscaleHelmChartVersion
+}
+
 func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtManagement *controllersManagement.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtFleet *controllersFleet.Factory) {
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	SecretResourceController := mgmtCore.Core().V1().Secret()
@@ -155,7 +169,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			yamlContent := fmt.Sprintf(k3sHelmChart,
 				obj.Name,
 				obj.Namespace,
-				k3sHelmChartVersion,
+				getK3sChartVersion(),
 				obj.Spec.KubernetesVersion,
 				strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
 				obj.Status.HeadscaleToken,
@@ -518,7 +532,7 @@ func createKubernetesCreate(obj *gorizondv1.Cluster, FleetBundleController contr
 	yamlContent := fmt.Sprintf(k3sHelmChart,
 		obj.Name,
 		obj.Namespace,
-		k3sHelmChartVersion,
+		getK3sChartVersion(),
 		obj.Spec.KubernetesVersion,
 		strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
 		obj.Status.HeadscaleToken,
@@ -647,7 +661,7 @@ func createHeadScaleCreate(obj *gorizondv1.Cluster, FleetBundleController contro
 	yamlContent := fmt.Sprintf(headscaleHelmChart,
 		obj.Name,
 		obj.Namespace,
-		headscaleHelmChartVersion,
+		getHeadscaleChartVersion(),
 		dsnHeadScale.GetHost(),
 		sanitizedNameHs,
 		dsnHeadScale.GetPassword(),
