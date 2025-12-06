@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 
@@ -19,6 +20,7 @@ func InitBillingClusterController(ctx context.Context, mgmtProvision *controller
 	ProvisionResourceController := mgmtProvision.Management().V3().Cluster()
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	BillingController := mgmtGorizond.Provisioning().V1().Billing()
+	NodeController := mgmtProvision.Management().V3().Node()
 
 	const billingFinalizer = "provisioning.gorizond.io/billing-balance-transfer"
 
@@ -199,12 +201,21 @@ func InitBillingClusterController(ctx context.Context, mgmtProvision *controller
 		if err != nil {
 			return nil, err
 		}
-		// check free cluster for node count
-		if gorizond.Status.Billing == "free" {
-			if obj.Status.NodeCount > billingFreeNodeCount {
-				log.Infof("Successfully checked cluster %s nodes: %s", obj.Name, obj.Status.NodeCount)
-				// TODO: Add scaling or notification logic
-				// For example, remove extra nodes or send a notification
+		// check free cluster for node count (only when billing spec is empty)
+		if gorizond.Status.Billing == "free" && gorizond.Spec.Billing == "" {
+			nodes, err := NodeController.Cache().List(obj.Name, labels.Everything())
+			if err != nil {
+				log.Errorf("Failed to list nodes for cluster %s: %v", obj.Name, err)
+				return obj, nil
+			}
+
+			extraWorkers := extraFreeClusterWorkers(nodes, billingFreeNodeCount)
+			for _, node := range extraWorkers {
+				if err := NodeController.Delete(node.Namespace, node.Name, nil); err != nil {
+					log.Errorf("Failed to delete extra worker %s/%s for cluster %s: %v", node.Namespace, node.Name, obj.Name, err)
+					continue
+				}
+				log.Infof("Deleted extra worker %s/%s for free cluster %s", node.Namespace, node.Name, obj.Name)
 			}
 			return obj, nil
 		}
@@ -280,4 +291,27 @@ func InitBillingClusterController(ctx context.Context, mgmtProvision *controller
 
 		return nil, nil
 	})
+}
+
+func extraFreeClusterWorkers(nodes []*managementv1.Node, freeNodeLimit int) []*managementv1.Node {
+	if freeNodeLimit < 0 {
+		freeNodeLimit = 0
+	}
+
+	workers := make([]*managementv1.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Spec.Worker && !node.Spec.ControlPlane && !node.Spec.Etcd {
+			workers = append(workers, node)
+		}
+	}
+
+	if len(workers) <= freeNodeLimit {
+		return nil
+	}
+
+	sort.Slice(workers, func(i, j int) bool {
+		return workers[i].CreationTimestamp.Time.Before(workers[j].CreationTimestamp.Time)
+	})
+
+	return workers[freeNodeLimit:]
 }
