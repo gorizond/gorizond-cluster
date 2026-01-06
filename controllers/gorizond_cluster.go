@@ -1,11 +1,9 @@
 package controllers
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/rand"
-	"encoding/base64"
+	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -17,12 +15,9 @@ import (
 	controllers "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
 	controllersv1 "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io/v1"
 	"github.com/kos-v/dsnparser"
-	fleetTypev1alpha1 "github.com/rancher/fleet/pkg/apis/fleet.cattle.io/v1alpha1"
 	"github.com/rancher/lasso/pkg/log"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	cattlev1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
-	controllersFleet "github.com/rancher/rancher/pkg/generated/controllers/fleet.cattle.io"
-	controllersFleetv1alpha1 "github.com/rancher/rancher/pkg/generated/controllers/fleet.cattle.io/v1alpha1"
 	controllersManagement "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
 	controllersManagementv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
@@ -34,53 +29,18 @@ import (
 	coreType "k8s.io/api/core/v1"
 	errorsk8s "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/pointer"
 )
 
-const k3sHelmChart = `
-apiVersion: helm.cattle.io/v1
-kind: HelmChart
-metadata:
-  name: %s-k3s
-  namespace: %s
-spec:
-  chart: k3s
-  repo: https://gorizond.github.io/fleet-gorizond-charts/
-  version: %s
-  timeout: 15m0s
-  set:
-    image.k3s.tag: %s
-    database: %s
-    token: %s
-    headscaleControlServerURL: %s
-    ingress.hosts[0].host: %s
-    ingress.hosts[0].paths[0].path: /
-    ingress.hosts[0].paths[0].pathType: ImplementationSpecific
-`
-
-const headscaleHelmChart = `
-apiVersion: helm.cattle.io/v1
-kind: HelmChart
-metadata:
-  name: %s-headscale
-  namespace: %s
-spec:
-  chart: headscale
-  repo: https://gorizond.github.io/fleet-gorizond-charts/
-  version: %s
-  timeout: 15m0s
-  set:
-    database.host: %s
-    database.name: %s
-    database.pass: %s
-    database.port: %s
-    database.user: %s
-    ingress.hosts[0].host: %s
-    ingress.hosts[0].paths[0].path: /
-    ingress.hosts[0].paths[0].pathType: ImplementationSpecific
-    noise_private: %s
-`
+var helmOpGVR = schema.GroupVersionResource{
+	Group:    "fleet.cattle.io",
+	Version:  "v1alpha1",
+	Resource: "helmops",
+}
 
 const k3sHelmChartVersion = "0.1.3"
 const headscaleHelmChartVersion = "0.1.14"
@@ -99,7 +59,130 @@ func getHeadscaleChartVersion() string {
 	return headscaleHelmChartVersion
 }
 
-func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtManagement *controllersManagement.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, mgmtFleet *controllersFleet.Factory) {
+func normalizeDNSLabel(base, hashSource string) string {
+	name := strings.ToLower(strings.TrimSpace(base))
+	if name == "" {
+		name = "g"
+	}
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	name = strings.Trim(b.String(), "-")
+	if name == "" {
+		name = "g"
+	}
+
+	sum := sha1.Sum([]byte(hashSource))
+	hash := hex.EncodeToString(sum[:])[:8]
+
+	const maxLen = 63
+	suffixLen := len(hash) + 1
+	if len(name) > maxLen-suffixLen {
+		name = strings.Trim(name[:maxLen-suffixLen], "-")
+		if name == "" {
+			name = "g"
+		}
+	}
+
+	return name + "-" + hash
+}
+
+func validateProvisionClusterName(name string) error {
+	if len(name) < 2 || len(name) > 63 {
+		return fmt.Errorf("cluster name must be between 2 and 63 characters")
+	}
+	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
+		return fmt.Errorf("cluster name must not begin or end with a hyphen")
+	}
+	for i := 0; i < len(name); i++ {
+		ch := name[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
+			continue
+		}
+		return fmt.Errorf("cluster name can only contain lowercase alphanumeric characters or '-'")
+	}
+	if name == "local" {
+		return fmt.Errorf("cluster name cannot be \"local\"")
+	}
+	if len(name) == 7 && name[0] == 'c' && name[1] == '-' {
+		valid := true
+		for i := 2; i < 7; i++ {
+			ch := name[i]
+			if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') {
+				continue
+			}
+			valid = false
+			break
+		}
+		if valid {
+			return fmt.Errorf("cluster name cannot be of the form \"c-xxxxx\"")
+		}
+	}
+	return nil
+}
+
+func gorizondUniqLabel(obj *gorizondv1.Cluster, prefix string) string {
+	base := prefix + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
+	return normalizeDNSLabel(base, obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/"+prefix)
+}
+
+func buildHelmOp(name, namespace, targetNamespace string, labels map[string]string, helm map[string]interface{}) *unstructured.Unstructured {
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	spec := map[string]interface{}{
+		"helm":             helm,
+		"namespace":        targetNamespace,
+		"defaultNamespace": targetNamespace,
+		"correctDrift": map[string]interface{}{
+			"enabled": true,
+		},
+		"targets": []interface{}{
+			map[string]interface{}{
+				"clusterSelector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"gorizond.runtime": "true",
+					},
+				},
+			},
+		},
+	}
+
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "fleet.cattle.io/v1alpha1",
+			"kind":       "HelmOp",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+				"labels":    labels,
+			},
+			"spec": spec,
+		},
+	}
+}
+
+func applyHelmOp(ctx context.Context, helmOps dynamic.ResourceInterface, obj *unstructured.Unstructured) error {
+	current, err := helmOps.Get(ctx, obj.GetName(), metav1.GetOptions{})
+	if err != nil {
+		if errorsk8s.IsNotFound(err) {
+			_, err = helmOps.Create(ctx, obj, metav1.CreateOptions{})
+			return err
+		}
+		return err
+	}
+	obj.SetResourceVersion(current.GetResourceVersion())
+	_, err = helmOps.Update(ctx, obj, metav1.UpdateOptions{})
+	return err
+}
+
+func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factory, mgmtManagement *controllersManagement.Factory, mgmtProvision *controllersProvision.Factory, mgmtCore *core.Factory, dynamicClient dynamic.Interface) {
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	SecretResourceController := mgmtCore.Core().V1().Secret()
 	NamespaceResourceController := mgmtCore.Core().V1().Namespace()
@@ -107,8 +190,8 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 	ClusterRoleTemplateBindingController := mgmtManagement.Management().V3().ClusterRoleTemplateBinding()
 	UserController := mgmtManagement.Management().V3().User()
 	FleetWorkspaceController := mgmtManagement.Management().V3().FleetWorkspace()
-	FleetBundleController := mgmtFleet.Fleet().V1alpha1().Bundle()
 	RegistrationTokenResourceController := mgmtManagement.Management().V3().ClusterRegistrationToken()
+	helmOps := dynamicClient.Resource(helmOpGVR).Namespace("fleet-default")
 	ProvisionResourceController.OnChange(ctx, "status-for-gorizond-cluster", func(key string, obj *cattlev1.Cluster) (*cattlev1.Cluster, error) {
 		if obj == nil {
 			return nil, nil
@@ -152,8 +235,10 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		if obj.Spec.KubernetesVersion != obj.Status.K3sVersion {
 			// upgrade k3s deployment
 			uniqName := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
-			k3sDomain := "api-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
-			HSServerURL := "http://headscale-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+			k3sLabel := gorizondUniqLabel(obj, "api-")
+			headscaleLabel := gorizondUniqLabel(obj, "headscale-")
+			k3sDomain := k3sLabel + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
+			HSServerURL := "http://" + headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
 			sanitizedNameApi := strings.NewReplacer(
 				".", "_",
 				"-", "_",
@@ -162,42 +247,41 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 				"#", "_",
 				"$", "_",
 			).Replace(obj.Namespace + "_api_" + obj.Status.Cluster)
-			fleetBundle, err := FleetBundleController.Get("fleet-default", uniqName, metav1.GetOptions{})
-			if err != nil {
-				return nil, err
+			helm := map[string]interface{}{
+				"repo":        "https://gorizond.github.io/fleet-gorizond-charts/",
+				"chart":       "k3s",
+				"version":     getK3sChartVersion(),
+				"releaseName": normalizeDNSLabel(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s"),
+				"values": map[string]interface{}{
+					"image": map[string]interface{}{
+						"k3s": map[string]interface{}{
+							"tag": obj.Spec.KubernetesVersion,
+						},
+					},
+					"database":                  strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
+					"token":                     obj.Status.HeadscaleToken,
+					"headscaleControlServerURL": HSServerURL,
+					"ingress": map[string]interface{}{
+						"hosts": []interface{}{
+							map[string]interface{}{
+								"host": k3sDomain,
+								"paths": []interface{}{
+									map[string]interface{}{
+										"path":     "/",
+										"pathType": "ImplementationSpecific",
+									},
+								},
+							},
+						},
+					},
+				},
 			}
-			yamlContent := fmt.Sprintf(k3sHelmChart,
-				obj.Name,
-				obj.Namespace,
-				getK3sChartVersion(),
-				obj.Spec.KubernetesVersion,
-				strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
-				obj.Status.HeadscaleToken,
-				HSServerURL,
-				k3sDomain)
-			encodedContent, err := compressAndEncode(yamlContent)
-			if err != nil {
-				return nil, err
+			labels := map[string]string{
+				"gorizond-deploy": obj.Name,
+				"workspace":       obj.Namespace,
 			}
-			// Update the existing helm-k3s.yaml resource or add it if it does not exist,
-			// without affecting other resources (for example, helm-headscale.yaml)
-			updated := false
-			for i := range fleetBundle.Spec.Resources {
-				if fleetBundle.Spec.Resources[i].Name == "helm-k3s.yaml" {
-					fleetBundle.Spec.Resources[i].Content = encodedContent
-					fleetBundle.Spec.Resources[i].Encoding = "base64+gz"
-					updated = true
-					break
-				}
-			}
-			if !updated {
-				fleetBundle.Spec.Resources = append(fleetBundle.Spec.Resources, fleetTypev1alpha1.BundleResource{
-					Content:  encodedContent,
-					Name:     "helm-k3s.yaml",
-					Encoding: "base64+gz",
-				})
-			}
-			if _, err := FleetBundleController.Update(fleetBundle); err != nil {
+			helmOp := buildHelmOp(normalizeDNSLabel(uniqName+"-k3s", obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/k3s-op"), "fleet-default", obj.Namespace, labels, helm)
+			if err := applyHelmOp(ctx, helmOps, helmOp); err != nil {
 				return nil, err
 			}
 			log.Infof("Updated k3s version to %s-->%s for cluster %s/%s", obj.Status.K3sVersion, obj.Spec.KubernetesVersion, obj.Namespace, obj.Name)
@@ -234,6 +318,14 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		}
 
 		if obj.Status.Provisioning == "" {
+			if err := validateProvisionClusterName(obj.Name); err != nil {
+				log.Infof("Invalid cluster name %q for %s/%s: %v", obj.Name, obj.Namespace, obj.Name, err)
+				if obj.Status.Provisioning != "InvalidName" {
+					obj.Status.Provisioning = "InvalidName"
+					return GorizondResourceController.Update(obj)
+				}
+				return obj, nil
+			}
 			return createCattleCluster(obj, mgmtProvision, GorizondResourceController)
 		}
 
@@ -269,7 +361,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			}
 
 			if obj.Status.HeadscaleToken == "" && obj.Status.Provisioning == "WaitHeadScaleCreate" {
-				return createHeadScaleCreate(obj, FleetBundleController, GorizondResourceController, sanitizedNameHs)
+				return createHeadScaleCreate(ctx, obj, helmOps, GorizondResourceController, sanitizedNameHs)
 			}
 
 			if obj.Status.HeadscaleToken == "" && obj.Status.Provisioning == "WaitHeadScaleToken" {
@@ -277,7 +369,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			}
 
 			if obj.Status.HeadscaleToken != "" && obj.Status.K3sToken == "" && obj.Status.Provisioning == "WaitKubernetesCreate" {
-				return createKubernetesCreate(obj, FleetBundleController, GorizondResourceController, sanitizedNameApi)
+				return createKubernetesCreate(ctx, obj, helmOps, GorizondResourceController, sanitizedNameApi)
 			}
 			if obj.Status.HeadscaleToken != "" && obj.Status.K3sToken == "" && obj.Status.Provisioning == "WaitKubernetesToken" {
 				return createKubernetesToken(obj, ctx, SecretResourceController, ProvisionResourceController, GorizondResourceController, RegistrationTokenResourceController)
@@ -302,16 +394,16 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			}
 		}
 
-		bundle, err := FleetBundleController.List("fleet-default", metav1.ListOptions{LabelSelector: selector})
+		helmOpList, err := helmOps.List(ctx, metav1.ListOptions{LabelSelector: selector})
 		if err != nil {
 			return obj, nil
 		}
-		for _, service := range bundle.Items {
-			err = FleetBundleController.Delete("fleet-default", service.Name, nil)
+		for _, service := range helmOpList.Items {
+			err = helmOps.Delete(ctx, service.GetName(), metav1.DeleteOptions{})
 			if err != nil {
 				return obj, nil
 			}
-			log.Infof("deleted bundle %s (%s)", service.Name, "fleet-default")
+			log.Infof("deleted helmop %s (%s)", service.GetName(), "fleet-default")
 		}
 		log.Infof("Successfully remove: %s.%s", obj.Namespace, obj.Name)
 
@@ -470,7 +562,7 @@ func createKubernetesToken(obj *gorizondv1.Cluster, ctx context.Context, SecretR
 		}
 		// parameters headscalek3s
 		namespace := obj.Status.Namespace
-		deploymentName := obj.Name + "-k3s"
+		deploymentName := normalizeDNSLabel(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s")
 		containerName := "k3s"
 
 		clientset, err := pkg.CreateClientset(clientConfig)
@@ -521,33 +613,49 @@ func createKubernetesToken(obj *gorizondv1.Cluster, ctx context.Context, SecretR
 	return GorizondResourceController.Update(obj)
 }
 
-func createKubernetesCreate(obj *gorizondv1.Cluster, FleetBundleController controllersFleetv1alpha1.BundleController, GorizondResourceController controllersv1.ClusterController, sanitizedNameApi string) (*gorizondv1.Cluster, error) {
+func createKubernetesCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOps dynamic.ResourceInterface, GorizondResourceController controllersv1.ClusterController, sanitizedNameApi string) (*gorizondv1.Cluster, error) {
 	uniqName := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
-	k3sDomain := "api-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
-	HSServerURL := "http://headscale-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
-	fleetBundle, err := FleetBundleController.Get("fleet-default", uniqName, metav1.GetOptions{})
-	if err != nil {
+	k3sLabel := gorizondUniqLabel(obj, "api-")
+	headscaleLabel := gorizondUniqLabel(obj, "headscale-")
+	k3sDomain := k3sLabel + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
+	HSServerURL := "http://" + headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	helm := map[string]interface{}{
+		"repo":        "https://gorizond.github.io/fleet-gorizond-charts/",
+		"chart":       "k3s",
+		"version":     getK3sChartVersion(),
+		"releaseName": normalizeDNSLabel(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s"),
+		"values": map[string]interface{}{
+			"image": map[string]interface{}{
+				"k3s": map[string]interface{}{
+					"tag": obj.Spec.KubernetesVersion,
+				},
+			},
+			"database":                  strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
+			"token":                     obj.Status.HeadscaleToken,
+			"headscaleControlServerURL": HSServerURL,
+			"ingress": map[string]interface{}{
+				"hosts": []interface{}{
+					map[string]interface{}{
+						"host": k3sDomain,
+						"paths": []interface{}{
+							map[string]interface{}{
+								"path":     "/",
+								"pathType": "ImplementationSpecific",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	labels := map[string]string{
+		"gorizond-deploy": obj.Name,
+		"workspace":       obj.Namespace,
+	}
+	helmOp := buildHelmOp(normalizeDNSLabel(uniqName+"-k3s", obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/k3s-op"), "fleet-default", obj.Namespace, labels, helm)
+	if err := applyHelmOp(ctx, helmOps, helmOp); err != nil {
 		return nil, err
 	}
-	yamlContent := fmt.Sprintf(k3sHelmChart,
-		obj.Name,
-		obj.Namespace,
-		getK3sChartVersion(),
-		obj.Spec.KubernetesVersion,
-		strings.ReplaceAll(os.Getenv("DB_DSN_KUBERNETES"), "/gorizond_truncate", "/"+sanitizedNameApi),
-		obj.Status.HeadscaleToken,
-		HSServerURL,
-		k3sDomain)
-	encodedContent, err := compressAndEncode(yamlContent)
-	if err != nil {
-		return nil, err
-	}
-	fleetBundle.Spec.Resources = append(fleetBundle.Spec.Resources, fleetTypev1alpha1.BundleResource{
-		Content:  encodedContent,
-		Name:     "helm-k3s.yaml",
-		Encoding: "base64+gz",
-	})
-	FleetBundleController.Update(fleetBundle)
 	obj.Status.Provisioning = "WaitKubernetesToken"
 	obj.Status.K3sVersion = obj.Spec.KubernetesVersion
 	return GorizondResourceController.Update(obj)
@@ -575,7 +683,7 @@ func createHeadScaleToken(obj *gorizondv1.Cluster, ctx context.Context, SecretRe
 		}
 		// parameters headscale
 		namespace := obj.Status.Namespace
-		deploymentName := obj.Name + "-headscale"
+		deploymentName := normalizeDNSLabel(obj.Name+"-headscale", obj.Namespace+"/"+obj.Name+"/headscale")
 		containerName := "headscale"
 
 		clientset, err := pkg.CreateClientset(clientConfig)
@@ -650,99 +758,55 @@ func generateNoisePrivateHex() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func createHeadScaleCreate(obj *gorizondv1.Cluster, FleetBundleController controllersFleetv1alpha1.BundleController, GorizondResourceController controllersv1.ClusterController, sanitizedNameHs string) (*gorizondv1.Cluster, error) {
+func createHeadScaleCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOps dynamic.ResourceInterface, GorizondResourceController controllersv1.ClusterController, sanitizedNameHs string) (*gorizondv1.Cluster, error) {
 	noisePrivateHex, err := generateNoisePrivateHex()
 	if err != nil {
 		return nil, err
 	}
-	domain := "headscale-" + obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	headscaleLabel := gorizondUniqLabel(obj, "headscale-")
+	domain := headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
 
 	dsnHeadScale := dsnparser.Parse(os.Getenv("DB_DSN_HEADSCALE"))
-	yamlContent := fmt.Sprintf(headscaleHelmChart,
-		obj.Name,
-		obj.Namespace,
-		getHeadscaleChartVersion(),
-		dsnHeadScale.GetHost(),
-		sanitizedNameHs,
-		dsnHeadScale.GetPassword(),
-		dsnHeadScale.GetPort(),
-		dsnHeadScale.GetUser(),
-		domain, "privkey:"+noisePrivateHex)
-	encodedContent, err := compressAndEncode(yamlContent)
-	if err != nil {
+	helm := map[string]interface{}{
+		"repo":        "https://gorizond.github.io/fleet-gorizond-charts/",
+		"chart":       "headscale",
+		"version":     getHeadscaleChartVersion(),
+		"releaseName": normalizeDNSLabel(obj.Name+"-headscale", obj.Namespace+"/"+obj.Name+"/headscale"),
+		"values": map[string]interface{}{
+			"database": map[string]interface{}{
+				"host": dsnHeadScale.GetHost(),
+				"name": sanitizedNameHs,
+				"pass": dsnHeadScale.GetPassword(),
+				"port": dsnHeadScale.GetPort(),
+				"user": dsnHeadScale.GetUser(),
+			},
+			"ingress": map[string]interface{}{
+				"hosts": []interface{}{
+					map[string]interface{}{
+						"host": domain,
+						"paths": []interface{}{
+							map[string]interface{}{
+								"path":     "/",
+								"pathType": "ImplementationSpecific",
+							},
+						},
+					},
+				},
+			},
+			"noise_private": "privkey:" + noisePrivateHex,
+		},
+	}
+	labels := map[string]string{
+		"gorizond-deploy": obj.Name,
+		"workspace":       obj.Namespace,
+	}
+	helmOp := buildHelmOp(normalizeDNSLabel(obj.Name+"-"+obj.Namespace+"-"+obj.Status.Cluster+"-headscale", obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/headscale-op"), "fleet-default", obj.Namespace, labels, helm)
+	if err := applyHelmOp(ctx, helmOps, helmOp); err != nil {
 		return nil, err
-	}
-	bundle := &fleetTypev1alpha1.Bundle{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster,
-			Namespace: "fleet-default",
-			Labels: map[string]string{
-				"gorizond-deploy": obj.Name,
-				"workspace":       obj.Namespace,
-			},
-		},
-		Spec: fleetTypev1alpha1.BundleSpec{
-			BundleDeploymentOptions: fleetTypev1alpha1.BundleDeploymentOptions{
-				IgnoreOptions: fleetTypev1alpha1.IgnoreOptions{
-					Conditions: []map[string]string{
-						{
-							"status": "False",
-							"type":   "Failed",
-						},
-					},
-				},
-			},
-			Targets: []fleetTypev1alpha1.BundleTarget{
-				fleetTypev1alpha1.BundleTarget{
-					ClusterSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"gorizond.runtime": "true",
-						},
-					},
-				},
-			},
-			TargetRestrictions: []fleetTypev1alpha1.BundleTargetRestriction{
-				fleetTypev1alpha1.BundleTargetRestriction{
-					ClusterSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"gorizond.runtime": "true",
-						},
-					},
-				},
-			},
-			Resources: []fleetTypev1alpha1.BundleResource{
-				fleetTypev1alpha1.BundleResource{
-					Content:  encodedContent,
-					Name:     "helm-headscale.yaml",
-					Encoding: "base64+gz",
-				},
-			},
-		},
-	}
-
-	_, err = FleetBundleController.Create(bundle)
-	if err != nil {
-		if errorsk8s.IsAlreadyExists(err) {
-			log.Infof("Bundle %s already exists in namespace %s", bundle.Name, bundle.Namespace)
-		} else {
-			return nil, err
-		}
 	}
 
 	obj.Status.Provisioning = "WaitHeadScaleToken"
 	return GorizondResourceController.Update(obj)
-}
-
-func compressAndEncode(content string) (string, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write([]byte(content)); err != nil {
-		return "", err
-	}
-	if err := gz.Close(); err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
 func AddAdminMember(obj *gorizondv1.Cluster, UserController controllersManagementv3.UserController, FleetWorkspaceController controllersManagementv3.FleetWorkspaceController, GorizondResourceController controllersv1.ClusterController, ClusterRoleTemplateBindingController controllersManagementv3.ClusterRoleTemplateBindingController) (*gorizondv1.Cluster, error) {

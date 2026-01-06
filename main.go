@@ -1,21 +1,22 @@
 package main
 
 import (
-	"os"
 	"flag"
+	"os"
+
 	controllers "github.com/gorizond/gorizond-cluster/controllers"
 	controllersGorizond "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
 	"github.com/joho/godotenv"
 	"github.com/rancher/lasso/pkg/log"
 	controllersManagement "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
-	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"    
-	controllersFleet "github.com/rancher/rancher/pkg/generated/controllers/fleet.cattle.io"
+	controllersProvision "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
 
+	"github.com/rancher/wrangler/v3/pkg/apply"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
 	"github.com/rancher/wrangler/v3/pkg/kubeconfig"
 	"github.com/rancher/wrangler/v3/pkg/signals"
 	"github.com/rancher/wrangler/v3/pkg/start"
-	"github.com/rancher/wrangler/v3/pkg/apply"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 )
 
@@ -62,17 +63,17 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		mgmtFleet, err := controllersFleet.NewFactoryFromConfig(configRancher)
-		if err != nil {
-			panic(err)
-		}
-	
 		mgmtCore, err := core.NewFactoryFromConfig(configRancher)
 		if err != nil {
 			panic(err)
 		}
 
-		controllers.InitClusterController(ctx, mgmtGorizond, mgmtManagement, mgmtProvision, mgmtCore, mgmtFleet)
+		dynamicClient, err := dynamic.NewForConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+
+		controllers.InitClusterController(ctx, mgmtGorizond, mgmtManagement, mgmtProvision, mgmtCore, dynamicClient)
 		starters = append(starters, mgmtGorizond, mgmtProvision)
     }
     if os.Getenv("ENABLE_CONTROLLER_BILLING") == "true" {
