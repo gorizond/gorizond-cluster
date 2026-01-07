@@ -7,20 +7,26 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gorizond/gorizond-cluster/pkg"
 	provv1 "github.com/gorizond/gorizond-cluster/pkg/apis/provisioning.gorizond.io/v1"
 	gorizondControllers "github.com/gorizond/gorizond-cluster/pkg/generated/controllers/provisioning.gorizond.io"
 	"github.com/rancher/lasso/pkg/log"
 	managementv1 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	controllersManagement "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
+	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
+	errorsk8s "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
-func InitBillingClusterController(ctx context.Context, mgmtProvision *controllersManagement.Factory, mgmtGorizond *gorizondControllers.Factory) {
+func InitBillingClusterController(ctx context.Context, mgmtProvision *controllersManagement.Factory, mgmtGorizond *gorizondControllers.Factory, mgmtCore *core.Factory) {
 	ProvisionResourceController := mgmtProvision.Management().V3().Cluster()
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	BillingController := mgmtGorizond.Provisioning().V1().Billing()
 	NodeController := mgmtProvision.Management().V3().Node()
+	SecretResourceController := mgmtCore.Core().V1().Secret()
 
 	const billingFinalizer = "provisioning.gorizond.io/billing-balance-transfer"
 
@@ -203,17 +209,69 @@ func InitBillingClusterController(ctx context.Context, mgmtProvision *controller
 		}
 		// check free cluster for node count (only when billing spec is empty)
 		if gorizond.Status.Billing == "free" && gorizond.Spec.Billing == "" {
-			nodes, err := NodeController.Cache().List(obj.Name, labels.Everything())
+			nodeNamespace := obj.Name
+			if gorizond.Status.Cluster != "" {
+				nodeNamespace = gorizond.Status.Cluster
+			}
+			nodes, err := NodeController.Cache().List(nodeNamespace, labels.Everything())
 			if err != nil {
 				log.Errorf("Failed to list nodes for cluster %s: %v", obj.Name, err)
 				return obj, nil
 			}
+			if len(nodes) == 0 {
+				nodeList, err := NodeController.List(nodeNamespace, v1.ListOptions{
+					LabelSelector: labels.Everything().String(),
+				})
+				if err != nil {
+					log.Errorf("Failed to list nodes (live) for cluster %s: %v", obj.Name, err)
+					return obj, nil
+				}
+				nodes = make([]*managementv1.Node, 0, len(nodeList.Items))
+				for i := range nodeList.Items {
+					nodes = append(nodes, &nodeList.Items[i])
+				}
+			}
+			if len(nodes) == 0 && obj.Status.NodeCount > 0 {
+				ProvisionResourceController.EnqueueAfter(obj.Name, 30*time.Second)
+				return obj, nil
+			}
 
 			extraWorkers := extraFreeClusterWorkers(nodes, billingFreeNodeCount)
+			var downstreamClientset *kubernetes.Clientset
+			if len(extraWorkers) > 0 {
+				secret, err := SecretResourceController.Get(gorizond.Namespace, gorizond.Name+"-kubeconfig", v1.GetOptions{})
+				if err != nil {
+					log.Errorf("Failed to get kubeconfig secret for cluster %s/%s: %v", gorizond.Namespace, gorizond.Name, err)
+				} else {
+					var clientConfig *rest.Config
+					if data := secret.Data["value"]; len(data) > 0 {
+						clientConfig, err = pkg.GetRestConfig(data)
+					} else {
+						log.Errorf("Kubeconfig secret %s/%s has no value data", gorizond.Namespace, gorizond.Name)
+					}
+					if err != nil {
+						log.Errorf("Failed to build downstream kubeconfig for cluster %s/%s: %v", gorizond.Namespace, gorizond.Name, err)
+					} else if clientConfig != nil {
+						downstreamClientset, err = pkg.CreateClientset(clientConfig)
+						if err != nil {
+							log.Errorf("Failed to create downstream client for cluster %s/%s: %v", gorizond.Namespace, gorizond.Name, err)
+						}
+					}
+				}
+			}
 			for _, node := range extraWorkers {
 				if err := NodeController.Delete(node.Namespace, node.Name, nil); err != nil {
 					log.Errorf("Failed to delete extra worker %s/%s for cluster %s: %v", node.Namespace, node.Name, obj.Name, err)
 					continue
+				}
+				if downstreamClientset != nil {
+					nodeName := node.Status.NodeName
+					if nodeName == "" {
+						nodeName = node.Name
+					}
+					if err := downstreamClientset.CoreV1().Nodes().Delete(ctx, nodeName, v1.DeleteOptions{}); err != nil && !errorsk8s.IsNotFound(err) {
+						log.Errorf("Failed to delete downstream node %s for cluster %s: %v", nodeName, obj.Name, err)
+					}
 				}
 				log.Infof("Deleted extra worker %s/%s for free cluster %s", node.Namespace, node.Name, obj.Name)
 			}

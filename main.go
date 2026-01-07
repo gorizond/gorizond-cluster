@@ -21,9 +21,9 @@ import (
 )
 
 func main() {
-	
+
 	ctx := signals.SetupSignalContext()
-	
+
 	err := godotenv.Load()
 	if err != nil {
 		log.Infof(".env file not found")
@@ -50,7 +50,7 @@ func main() {
 	var starters []start.Starter
 	var mgmtManagement *controllersManagement.Factory
 	var mgmtGorizond *controllersGorizond.Factory
-    if os.Getenv("ENABLE_CONTROLLER_GORIZOND") == "true" {
+	if os.Getenv("ENABLE_CONTROLLER_GORIZOND") == "true" {
 		mgmtGorizond, err = controllersGorizond.NewFactoryFromConfig(configRancher)
 		if err != nil {
 			panic(err)
@@ -75,9 +75,9 @@ func main() {
 
 		controllers.InitClusterController(ctx, mgmtGorizond, mgmtManagement, mgmtProvision, mgmtCore, dynamicClient)
 		starters = append(starters, mgmtGorizond, mgmtProvision)
-    }
-    if os.Getenv("ENABLE_CONTROLLER_BILLING") == "true" {
-    	mgmtManagement, err = controllersManagement.NewFactoryFromConfig(configRancher)
+	}
+	if os.Getenv("ENABLE_CONTROLLER_BILLING") == "true" {
+		mgmtManagement, err = controllersManagement.NewFactoryFromConfig(configRancher)
 		if err != nil {
 			panic(err)
 		}
@@ -85,21 +85,24 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		
+		mgmtCore, err := core.NewFactoryFromConfig(configRancher)
+		if err != nil {
+			panic(err)
+		}
+
 		apply, err := apply.NewForConfig(configRancher)
 		if err != nil {
 			panic(err)
 		}
-		controllers.InitBillingClusterController(ctx, mgmtManagement, mgmtGorizond)
+		controllers.InitBillingClusterController(ctx, mgmtManagement, mgmtGorizond, mgmtCore)
 		controllers.InitBillingEventController(ctx, mgmtGorizond.Provisioning().V1().Billing(), mgmtGorizond.Provisioning().V1().BillingEvent(), apply, 4)
 		controllers.InitPeriodicBillingController(ctx, mgmtGorizond.Provisioning().V1().Cluster(), mgmtGorizond.Provisioning().V1().BillingEvent())
-		starters = append(starters, mgmtManagement, mgmtGorizond)
-    }
-     // start controllers
+		starters = append(starters, mgmtManagement, mgmtGorizond, mgmtCore)
+	}
+	// start controllers
 	if err := start.All(ctx, 50, starters...); err != nil {
 		panic(err)
 	}
-
 
 	<-ctx.Done()
 }

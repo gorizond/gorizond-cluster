@@ -235,10 +235,8 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		if obj.Spec.KubernetesVersion != obj.Status.K3sVersion {
 			// upgrade k3s deployment
 			uniqName := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
-			k3sLabel := gorizondUniqLabel(obj, "api-")
-			headscaleLabel := gorizondUniqLabel(obj, "headscale-")
-			k3sDomain := k3sLabel + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
-			HSServerURL := "http://" + headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+			k3sDomain := "api-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
+			HSServerURL := "http://headscale-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
 			sanitizedNameApi := strings.NewReplacer(
 				".", "_",
 				"-", "_",
@@ -615,10 +613,8 @@ func createKubernetesToken(obj *gorizondv1.Cluster, ctx context.Context, SecretR
 
 func createKubernetesCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOps dynamic.ResourceInterface, GorizondResourceController controllersv1.ClusterController, sanitizedNameApi string) (*gorizondv1.Cluster, error) {
 	uniqName := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
-	k3sLabel := gorizondUniqLabel(obj, "api-")
-	headscaleLabel := gorizondUniqLabel(obj, "headscale-")
-	k3sDomain := k3sLabel + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
-	HSServerURL := "http://" + headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	k3sDomain := "api-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
+	HSServerURL := "http://headscale-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
 	helm := map[string]interface{}{
 		"repo":        "https://gorizond.github.io/fleet-gorizond-charts/",
 		"chart":       "k3s",
@@ -763,8 +759,8 @@ func createHeadScaleCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOps
 	if err != nil {
 		return nil, err
 	}
-	headscaleLabel := gorizondUniqLabel(obj, "headscale-")
-	domain := headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	uniqName := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
+	domain := "headscale-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
 
 	dsnHeadScale := dsnparser.Parse(os.Getenv("DB_DSN_HEADSCALE"))
 	helm := map[string]interface{}{
