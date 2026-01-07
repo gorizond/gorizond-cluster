@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -21,19 +22,21 @@ type Cluster struct {
 
 type ClusterSpec struct {
 	KubernetesVersion string `json:"kubernetesVersion"`
-	Billing string  `json:"billing"`
+	Billing           string `json:"billing"`
 }
 
 type ClusterStatus struct {
 	// +kubebuilder:validation:Format=date-time
-    LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
-	Provisioning   string `json:"provisioning"`
-	Cluster        string `json:"cluster"`
-	K3sToken       string `json:"k3sToken"`
-	K3sVersion     string `json:"k3sVersion"`
-	HeadscaleToken string `json:"headscaleToken"`
-	Namespace      string `json:"namespace"`
-	Billing        string `json:"billing"`
+	LastTransitionTime        metav1.Time `json:"lastTransitionTime,omitempty"`
+	Provisioning              string      `json:"provisioning"`
+	Cluster                   string      `json:"cluster"`
+	K3sToken                  string      `json:"k3sToken"`
+	K3sVersion                string      `json:"k3sVersion"`
+	K3sLabel                  string      `json:"k3sLabel,omitempty"`
+	HeadscaleToken            string      `json:"headscaleToken"`
+	HeadscaleLabel            string      `json:"headscaleLabel,omitempty"`
+	Namespace                 string      `json:"namespace"`
+	Billing                   string      `json:"billing"`
 	LastTransitionBillingTime metav1.Time `json:"lastTransitionBillingTime,omitempty"`
 }
 
@@ -50,7 +53,7 @@ type BillingStatus struct {
 	Balance float64 `json:"balance,omitempty"`
 	// +kubebuilder:validation:Format=date-time
 	LastChargedAt metav1.Time `json:"lastChargedAt,omitempty"`
-	LastEventId string `json:"lastEventId,omitempty"`
+	LastEventId   string      `json:"lastEventId,omitempty"`
 }
 
 // +genclient
@@ -65,9 +68,9 @@ type BillingEvent struct {
 type BillingEventStatus struct {
 	Type string `json:"type,omitempty"`
 	// +kubebuilder:validation:Format=date-time
-    TransitionTime metav1.Time `json:"transitionTime,omitempty"`
-    BillingName string `json:"billingName,omitempty"`
-	Amount          float64 `json:"amount,omitempty"`
+	TransitionTime metav1.Time `json:"transitionTime,omitempty"`
+	BillingName    string      `json:"billingName,omitempty"`
+	Amount         float64     `json:"amount,omitempty"`
 }
 
 // Tag represents a Docker tag

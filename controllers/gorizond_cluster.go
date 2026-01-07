@@ -93,6 +93,18 @@ func normalizeDNSLabel(base, hashSource string) string {
 	return name + "-" + hash
 }
 
+func ensureDNSLabel(base, hashSource string) string {
+	label := strings.ToLower(strings.TrimSpace(base))
+	label = strings.Trim(label, "-")
+	if label == "" {
+		label = "g"
+	}
+	if len(label) <= 63 {
+		return label
+	}
+	return normalizeDNSLabel(label, hashSource)
+}
+
 func validateProvisionClusterName(name string) error {
 	if len(name) < 2 || len(name) > 63 {
 		return fmt.Errorf("cluster name must be between 2 and 63 characters")
@@ -235,8 +247,11 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		if obj.Spec.KubernetesVersion != obj.Status.K3sVersion {
 			// upgrade k3s deployment
 			uniqName := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
-			k3sDomain := "api-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
-			HSServerURL := "http://headscale-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+			k3sLabel := ensureDNSLabel("api-"+uniqName, obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/api")
+			headscaleLabel := ensureDNSLabel("headscale-"+uniqName, obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/headscale")
+			k3sDomain := k3sLabel + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
+			headscaleDomain := headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+			HSServerURL := "http://" + headscaleDomain
 			sanitizedNameApi := strings.NewReplacer(
 				".", "_",
 				"-", "_",
@@ -284,6 +299,8 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 			}
 			log.Infof("Updated k3s version to %s-->%s for cluster %s/%s", obj.Status.K3sVersion, obj.Spec.KubernetesVersion, obj.Namespace, obj.Name)
 			obj.Status.K3sVersion = obj.Spec.KubernetesVersion
+			obj.Status.K3sLabel = k3sLabel
+			obj.Status.HeadscaleLabel = headscaleLabel
 			return GorizondResourceController.Update(obj)
 		}
 		return obj, nil
@@ -613,8 +630,11 @@ func createKubernetesToken(obj *gorizondv1.Cluster, ctx context.Context, SecretR
 
 func createKubernetesCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOps dynamic.ResourceInterface, GorizondResourceController controllersv1.ClusterController, sanitizedNameApi string) (*gorizondv1.Cluster, error) {
 	uniqName := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
-	k3sDomain := "api-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
-	HSServerURL := "http://headscale-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	k3sLabel := ensureDNSLabel("api-"+uniqName, obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/api")
+	headscaleLabel := ensureDNSLabel("headscale-"+uniqName, obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/headscale")
+	k3sDomain := k3sLabel + "." + os.Getenv("GORIZOND_DOMAIN_K3S")
+	headscaleDomain := headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	HSServerURL := "http://" + headscaleDomain
 	helm := map[string]interface{}{
 		"repo":        "https://gorizond.github.io/fleet-gorizond-charts/",
 		"chart":       "k3s",
@@ -654,6 +674,8 @@ func createKubernetesCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOp
 	}
 	obj.Status.Provisioning = "WaitKubernetesToken"
 	obj.Status.K3sVersion = obj.Spec.KubernetesVersion
+	obj.Status.K3sLabel = k3sLabel
+	obj.Status.HeadscaleLabel = headscaleLabel
 	return GorizondResourceController.Update(obj)
 }
 
@@ -760,7 +782,10 @@ func createHeadScaleCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOps
 		return nil, err
 	}
 	uniqName := obj.Name + "-" + obj.Namespace + "-" + obj.Status.Cluster
-	domain := "headscale-" + uniqName + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	headscaleLabel := ensureDNSLabel("headscale-"+uniqName, obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/headscale")
+	k3sLabel := ensureDNSLabel("api-"+uniqName, obj.Namespace+"/"+obj.Name+"/"+obj.Status.Cluster+"/api")
+	headscaleDomain := headscaleLabel + "." + os.Getenv("GORIZOND_DOMAIN_HEADSCALE")
+	domain := headscaleDomain
 
 	dsnHeadScale := dsnparser.Parse(os.Getenv("DB_DSN_HEADSCALE"))
 	helm := map[string]interface{}{
@@ -802,6 +827,8 @@ func createHeadScaleCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOps
 	}
 
 	obj.Status.Provisioning = "WaitHeadScaleToken"
+	obj.Status.HeadscaleLabel = headscaleLabel
+	obj.Status.K3sLabel = k3sLabel
 	return GorizondResourceController.Update(obj)
 }
 

@@ -30,7 +30,11 @@ spec:
                   type: string
                 k3sVersion:
                   type: string
+                k3sLabel:
+                  type: string
                 headscaleToken:
+                  type: string
+                headscaleLabel:
                   type: string
                 namespace:
                   type: string
@@ -48,4 +52,4 @@ spec:
     singular: cluster
     kind: Cluster
     shortNames:
-    - gorizond
+      - gorizond
