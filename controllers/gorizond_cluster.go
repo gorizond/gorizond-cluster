@@ -59,7 +59,7 @@ func getHeadscaleChartVersion() string {
 	return headscaleHelmChartVersion
 }
 
-func normalizeDNSLabel(base, hashSource string) string {
+func normalizeDNSLabelWithMax(base, hashSource string, maxLen int) string {
 	name := strings.ToLower(strings.TrimSpace(base))
 	if name == "" {
 		name = "g"
@@ -81,7 +81,6 @@ func normalizeDNSLabel(base, hashSource string) string {
 	sum := sha1.Sum([]byte(hashSource))
 	hash := hex.EncodeToString(sum[:])[:8]
 
-	const maxLen = 63
 	suffixLen := len(hash) + 1
 	if len(name) > maxLen-suffixLen {
 		name = strings.Trim(name[:maxLen-suffixLen], "-")
@@ -91,6 +90,14 @@ func normalizeDNSLabel(base, hashSource string) string {
 	}
 
 	return name + "-" + hash
+}
+
+func normalizeDNSLabel(base, hashSource string) string {
+	return normalizeDNSLabelWithMax(base, hashSource, 63)
+}
+
+func normalizeHelmReleaseName(base, hashSource string) string {
+	return normalizeDNSLabelWithMax(base, hashSource, 53)
 }
 
 func ensureDNSLabel(base, hashSource string) string {
@@ -264,7 +271,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 				"repo":        "https://gorizond.github.io/fleet-gorizond-charts/",
 				"chart":       "k3s",
 				"version":     getK3sChartVersion(),
-				"releaseName": normalizeDNSLabel(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s"),
+				"releaseName": normalizeHelmReleaseName(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s"),
 				"values": map[string]interface{}{
 					"image": map[string]interface{}{
 						"k3s": map[string]interface{}{
@@ -577,7 +584,7 @@ func createKubernetesToken(obj *gorizondv1.Cluster, ctx context.Context, SecretR
 		}
 		// parameters headscalek3s
 		namespace := obj.Status.Namespace
-		deploymentName := normalizeDNSLabel(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s")
+		deploymentName := normalizeHelmReleaseName(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s")
 		containerName := "k3s"
 
 		clientset, err := pkg.CreateClientset(clientConfig)
@@ -639,7 +646,7 @@ func createKubernetesCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOp
 		"repo":        "https://gorizond.github.io/fleet-gorizond-charts/",
 		"chart":       "k3s",
 		"version":     getK3sChartVersion(),
-		"releaseName": normalizeDNSLabel(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s"),
+		"releaseName": normalizeHelmReleaseName(obj.Name+"-k3s", obj.Namespace+"/"+obj.Name+"/k3s"),
 		"values": map[string]interface{}{
 			"image": map[string]interface{}{
 				"k3s": map[string]interface{}{
@@ -701,7 +708,7 @@ func createHeadScaleToken(obj *gorizondv1.Cluster, ctx context.Context, SecretRe
 		}
 		// parameters headscale
 		namespace := obj.Status.Namespace
-		deploymentName := normalizeDNSLabel(obj.Name+"-headscale", obj.Namespace+"/"+obj.Name+"/headscale")
+		deploymentName := normalizeHelmReleaseName(obj.Name+"-headscale", obj.Namespace+"/"+obj.Name+"/headscale")
 		containerName := "headscale"
 
 		clientset, err := pkg.CreateClientset(clientConfig)
@@ -792,7 +799,7 @@ func createHeadScaleCreate(ctx context.Context, obj *gorizondv1.Cluster, helmOps
 		"repo":        "https://gorizond.github.io/fleet-gorizond-charts/",
 		"chart":       "headscale",
 		"version":     getHeadscaleChartVersion(),
-		"releaseName": normalizeDNSLabel(obj.Name+"-headscale", obj.Namespace+"/"+obj.Name+"/headscale"),
+		"releaseName": normalizeHelmReleaseName(obj.Name+"-headscale", obj.Namespace+"/"+obj.Name+"/headscale"),
 		"values": map[string]interface{}{
 			"database": map[string]interface{}{
 				"host": dsnHeadScale.GetHost(),
