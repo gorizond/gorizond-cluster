@@ -43,7 +43,7 @@ var helmOpGVR = schema.GroupVersionResource{
 }
 
 const k3sHelmChartVersion = "0.1.3"
-const headscaleHelmChartVersion = "0.1.14"
+const headscaleHelmChartVersion = "0.1.15"
 
 func getK3sChartVersion() string {
 	if v := os.Getenv("K3S_HELM_CHART_VERSION"); v != "" {
