@@ -318,11 +318,17 @@ func InitBillingClusterController(ctx context.Context, mgmtProvision *controller
 				return cluster, err
 			}
 			log.Infof("Updated cluster %s billing status to %s", cluster.Name, billingStatus)
+			if billingStatus == "free" && updatedCluster.Status.Cluster != "" {
+				ProvisionResourceController.Enqueue(updatedCluster.Status.Cluster)
+			}
 			// Enqueue the corresponding billing only when status actually changes
 			if updatedCluster.Spec.Billing != "" {
 				BillingController.Enqueue(updatedCluster.Namespace, updatedCluster.Spec.Billing)
 			}
 			return updatedCluster, nil
+		}
+		if billingStatus == "free" && cluster.Spec.Billing == "" && cluster.Status.Cluster != "" {
+			ProvisionResourceController.Enqueue(cluster.Status.Cluster)
 		}
 		return cluster, nil
 	})
