@@ -87,22 +87,27 @@ func InitHeadscaleNodeApproveController(
 			lastErr          error
 		)
 
+		candidates := candidateNodeIdentifiers(node)
+
 		for _, runtimeCluster := range runtimeClusters {
 			cfgCandidate, clientCandidate, err := buildRuntimeClientForCluster(SecretResourceController, runtimeCluster)
 			if err != nil {
 				lastErr = err
+				log.Infof("headscale approve: skip runtime cluster %s: build client failed: %v", runtimeCluster, err)
 				continue
 			}
 
 			podName, err := getHeadscalePodName(ctx, clientCandidate, node.Namespace)
 			if err != nil {
 				lastErr = err
+				log.Infof("headscale approve: skip runtime cluster %s: no ready headscale pod in namespace %s: %v", runtimeCluster, node.Namespace, err)
 				continue
 			}
 
 			out, _, err := runHeadscaleCommand(cfgCandidate, clientCandidate, node.Namespace, podName, "headscale", "nodes", "list")
 			if err != nil {
 				lastErr = err
+				log.Infof("headscale approve: skip runtime cluster %s: headscale nodes list failed: %v", runtimeCluster, err)
 				continue
 			}
 
@@ -125,9 +130,9 @@ func InitHeadscaleNodeApproveController(
 			return node, nil
 		}
 
-		_ = usedRuntime // reserved for future debug logs
+		log.Infof("headscale approve: selected runtime cluster %s for %s/%s", usedRuntime, node.Namespace, node.Name)
 
-		if !isNodeListed(listOutput, candidateNodeIdentifiers(node)...) {
+		if !isNodeListed(listOutput, candidates...) {
 			setNextRun(key, now.Add(20*time.Second))
 			NodeResourceController.EnqueueAfter(node.Namespace, node.Name, 20*time.Second)
 			log.Infof("headscale approve pending: node %s/%s not found in headscale list yet", node.Namespace, node.Name)
@@ -135,7 +140,7 @@ func InitHeadscaleNodeApproveController(
 		}
 
 		approved := false
-		for _, candidate := range candidateNodeIdentifiers(node) {
+		for _, candidate := range candidates {
 			if candidate == "" {
 				continue
 			}
@@ -146,7 +151,7 @@ func InitHeadscaleNodeApproveController(
 		}
 
 		if !approved {
-			nodeID := nodeIDFromHeadscaleList(listOutput, candidateNodeIdentifiers(node)...)
+			nodeID := nodeIDFromHeadscaleList(listOutput, candidates...)
 			if nodeID == "" {
 				setNextRun(key, now.Add(30*time.Second))
 				NodeResourceController.EnqueueAfter(node.Namespace, node.Name, 30*time.Second)
@@ -258,8 +263,13 @@ func buildRuntimeClientForCluster(SecretResourceController controllersCore.Secre
 	}
 
 	var cfg *rest.Config
-	if os.Getenv("DEBUG_LOCAL_KUBECOFING") != "" {
-		cfg, err = kubeconfig.GetNonInteractiveClientConfig(os.Getenv("DEBUG_LOCAL_KUBECOFING")).ClientConfig()
+	// Backward compatible: keep the old misspelled env var too.
+	debugKubeconfig := os.Getenv("DEBUG_LOCAL_KUBECONFIG")
+	if debugKubeconfig == "" {
+		debugKubeconfig = os.Getenv("DEBUG_LOCAL_KUBECOFING")
+	}
+	if debugKubeconfig != "" {
+		cfg, err = kubeconfig.GetNonInteractiveClientConfig(debugKubeconfig).ClientConfig()
 	} else {
 		cfg, err = pkg.GetRestConfig(secret.Data["value"])
 	}
