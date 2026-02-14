@@ -205,6 +205,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 	GorizondResourceController := mgmtGorizond.Provisioning().V1().Cluster()
 	SecretResourceController := mgmtCore.Core().V1().Secret()
 	NamespaceResourceController := mgmtCore.Core().V1().Namespace()
+	NodeResourceController := mgmtManagement.Management().V3().Node()
 	ProvisionResourceController := mgmtProvision.Provisioning().V1().Cluster()
 	ClusterRoleTemplateBindingController := mgmtManagement.Management().V3().ClusterRoleTemplateBinding()
 	UserController := mgmtManagement.Management().V3().User()
@@ -535,6 +536,8 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		}
 		return obj, nil
 	})
+
+	InitHeadscaleNodeApproveController(ctx, NodeResourceController, ProvisionResourceController, SecretResourceController)
 }
 
 func ArgsFromDsn(dns string, database string) []string {
