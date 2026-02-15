@@ -537,7 +537,7 @@ func InitClusterController(ctx context.Context, mgmtGorizond *controllers.Factor
 		return obj, nil
 	})
 
-	InitHeadscaleNodeApproveController(ctx, NodeResourceController, ProvisionResourceController, SecretResourceController)
+	InitHeadscaleNodeApproveController(ctx, NodeResourceController, ProvisionResourceController, GorizondResourceController, SecretResourceController)
 }
 
 func ArgsFromDsn(dns string, database string) []string {
