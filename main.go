@@ -74,7 +74,9 @@ func main() {
 		}
 
 		controllers.InitClusterController(ctx, mgmtGorizond, mgmtManagement, mgmtProvision, mgmtCore, dynamicClient)
-		starters = append(starters, mgmtGorizond, mgmtProvision)
+		// InitClusterController registers handlers on management/core/provision/gorizond informers,
+		// so we must start all factories.
+		starters = append(starters, mgmtManagement, mgmtCore, mgmtGorizond, mgmtProvision)
 	}
 	if os.Getenv("ENABLE_CONTROLLER_BILLING") == "true" {
 		mgmtManagement, err = controllersManagement.NewFactoryFromConfig(configRancher)
