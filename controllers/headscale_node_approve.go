@@ -2,8 +2,10 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -156,6 +158,8 @@ func InitHeadscaleNodeApproveController(
 		}
 
 		approved := false
+		nodeID := nodeIDFromHeadscaleList(listOutput, candidates...)
+
 		for _, candidate := range candidates {
 			if candidate == "" {
 				continue
@@ -167,7 +171,6 @@ func InitHeadscaleNodeApproveController(
 		}
 
 		if !approved {
-			nodeID := nodeIDFromHeadscaleList(listOutput, candidates...)
 			if nodeID == "" {
 				setNextRun(key, now.Add(30*time.Second))
 				NodeResourceController.EnqueueAfter(node.Namespace, node.Name, 30*time.Second)
@@ -186,6 +189,29 @@ func InitHeadscaleNodeApproveController(
 		if !approved {
 			setNextRun(key, now.Add(30*time.Second))
 			NodeResourceController.EnqueueAfter(node.Namespace, node.Name, 30*time.Second)
+			return node, nil
+		}
+
+		nodesJSONOutput, _, err := runHeadscaleCommand(cfg, clientset, workspaceNamespace, headscalePodName, "headscale", "nodes", "list", "-o", "json")
+		if err != nil {
+			setNextRun(key, now.Add(30*time.Second))
+			NodeResourceController.EnqueueAfter(node.Namespace, node.Name, 30*time.Second)
+			log.Errorf("headscale approve: failed to get nodes json for %s/%s: %v", node.Namespace, node.Name, err)
+			return node, nil
+		}
+
+		hsNode, resolvedNodeID, err := headscaleNodeFromJSON(nodesJSONOutput, nodeID, candidates...)
+		if err != nil {
+			setNextRun(key, now.Add(30*time.Second))
+			NodeResourceController.EnqueueAfter(node.Namespace, node.Name, 30*time.Second)
+			log.Errorf("headscale approve: failed to resolve node and routes for %s/%s: %v", node.Namespace, node.Name, err)
+			return node, nil
+		}
+
+		if err := ensureHeadscaleRoutesApproved(cfg, clientset, workspaceNamespace, headscalePodName, resolvedNodeID, hsNode.AvailableRoutes, hsNode.ApprovedRoutes); err != nil {
+			setNextRun(key, now.Add(30*time.Second))
+			NodeResourceController.EnqueueAfter(node.Namespace, node.Name, 30*time.Second)
+			log.Errorf("headscale approve: route approval failed for %s/%s (id=%s): %v", node.Namespace, node.Name, resolvedNodeID, err)
 			return node, nil
 		}
 
@@ -410,4 +436,74 @@ func nodeIDFromHeadscaleList(listOutput string, candidates ...string) string {
 	return ""
 }
 
-//
+type headscaleNode struct {
+	ID              uint64   `json:"id"`
+	Name            string   `json:"name"`
+	GivenName       string   `json:"given_name"`
+	AvailableRoutes []string `json:"available_routes"`
+	ApprovedRoutes  []string `json:"approved_routes"`
+}
+
+func headscaleNodeFromJSON(nodesJSON, preferredID string, candidates ...string) (*headscaleNode, string, error) {
+	var nodes []headscaleNode
+	if err := json.Unmarshal([]byte(nodesJSON), &nodes); err != nil {
+		return nil, "", fmt.Errorf("parse headscale nodes json failed: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, "", fmt.Errorf("headscale nodes list is empty")
+	}
+
+	if preferredID != "" {
+		for i := range nodes {
+			if strconv.FormatUint(nodes[i].ID, 10) == preferredID {
+				return &nodes[i], preferredID, nil
+			}
+		}
+	}
+
+	for i := range nodes {
+		for _, candidate := range candidates {
+			if candidate == "" {
+				continue
+			}
+			if nodes[i].Name == candidate || nodes[i].GivenName == candidate {
+				return &nodes[i], strconv.FormatUint(nodes[i].ID, 10), nil
+			}
+		}
+	}
+
+	return nil, "", fmt.Errorf("no matching node in headscale json")
+}
+
+func ensureHeadscaleRoutesApproved(
+	cfg *rest.Config,
+	clientset *kubernetes.Clientset,
+	namespace, podName, nodeID string,
+	availableRoutes, approvedRoutes []string,
+) error {
+	if len(availableRoutes) == 0 {
+		return nil
+	}
+
+	approvedSet := map[string]struct{}{}
+	for _, r := range approvedRoutes {
+		approvedSet[r] = struct{}{}
+	}
+
+	missing := make([]string, 0)
+	for _, r := range availableRoutes {
+		if _, ok := approvedSet[r]; !ok {
+			missing = append(missing, r)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+
+	routesArg := strings.Join(availableRoutes, ",")
+	if _, _, err := runHeadscaleCommand(cfg, clientset, namespace, podName, "headscale", "nodes", "approve-routes", "-i", nodeID, "-r", routesArg); err != nil {
+		return fmt.Errorf("approve-routes failed for id=%s routes=%s: %w", nodeID, routesArg, err)
+	}
+
+	return nil
+}
